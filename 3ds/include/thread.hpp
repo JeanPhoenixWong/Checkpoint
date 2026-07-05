@@ -37,7 +37,10 @@
 namespace Threads {
     inline constexpr int MAX_THREADS = 32;
 
-    inline constexpr size_t DEFAULT_STACK = 0x4000;
+    // 16KB proved too small: the cart-scan thread overflowed it during a DS cart
+    // probe (SPI retries + Logging's format/iostream/strftime chain) and smashed
+    // the thread's newlib reent, which libctru places directly below the stack.
+    inline constexpr size_t DEFAULT_STACK = 0x8000;
     inline constexpr size_t WORKER_STACK  = 0x8000;
 
     bool init(u8 minWorkers, u8 maxWorkers);
