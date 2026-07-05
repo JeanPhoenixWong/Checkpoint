@@ -88,7 +88,7 @@ namespace {
 
     // Supported language codes, in cycle order. Adding a language only means
     // appending here (plus its romfs i18n.json entries and isSupported()).
-    const std::string LANGUAGES[]   = {"en", "it", "es"};
+    const std::string LANGUAGES[]   = {"en", "it", "es", "fr", "de", "pt", "nl", "ja"};
     constexpr size_t LANGUAGE_COUNT = sizeof(LANGUAGES) / sizeof(LANGUAGES[0]);
 
     // Display name for a language code, in its own language (never localized).
@@ -98,6 +98,16 @@ namespace {
             return "Italiano";
         if (code == "es")
             return "Español";
+        if (code == "fr")
+            return "Français";
+        if (code == "de")
+            return "Deutsch";
+        if (code == "pt")
+            return "Português";
+        if (code == "nl")
+            return "Nederlands";
+        if (code == "ja")
+            return "日本語";
         return "English";
     }
 
