@@ -37,7 +37,6 @@
 #include "io.hpp"
 #include "main.hpp"
 #include "multiselection.hpp"
-#include "pksmbridge.hpp"
 #include "savekind.hpp"
 #include "title.hpp"
 #include "transferstatus.hpp"
@@ -64,8 +63,6 @@ protected:
     size_t index(entryType_t type) const;
     void index(entryType_t type, size_t i);
     void resetIndex(entryType_t type);
-    bool getPKSMBridgeFlag(void) const;
-    void setPKSMBridgeFlag(bool f);
     void setSaveTypeFilter(saveTypeFilter_t filter);
     size_t rawIndex(void) const;
     void doBackup(size_t rawIdx, size_t cellIndex);
@@ -77,7 +74,6 @@ protected:
 private:
     entryType_t type;
     int selectionTimer;
-    bool pksmBridge;
     bool sidebarFocused              = false;
     bool sidebarExitFrame            = false;
     bool backupScrollEnabled         = false;

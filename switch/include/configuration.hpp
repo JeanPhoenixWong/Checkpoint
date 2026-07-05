@@ -54,7 +54,6 @@ public:
 
     bool filter(u64 id);
     bool favorite(u64 id);
-    bool isPKSMBridgeEnabled(void);
     bool isFTPEnabled(void);
     // Whether a restore asks for a YesNo confirmation first (parity with the 3DS
     // confirm_restore setting). Default true — a restore overwrites the save.
@@ -80,7 +79,6 @@ public:
     // no separate "save" step; every change writes config.json synchronously.
     void setFilter(u64 id, bool hidden);
     void setFavorite(u64 id, bool favorite);
-    void setPKSMBridgeEnabled(bool enabled);
     void setFTPEnabled(bool enabled);
     void setConfirmRestoreEnabled(bool enabled);
     void addAdditionalSaveFolder(u64 id, const std::string& path);
@@ -116,7 +114,6 @@ private:
     void operator=(Configuration const&) = delete;
 
     nlohmann::json mJson;
-    bool PKSMBridgeEnabled;
     bool FTPEnabled;
     bool mConfirmRestore;
     std::unordered_set<u64> mFilterIds, mFavoriteIds;

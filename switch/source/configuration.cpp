@@ -63,10 +63,6 @@ Configuration::Configuration(void)
             mJson["version"] = CONFIG_VERSION;
             updateJson       = true;
         }
-        if (!(mJson.contains("pksm-bridge") && mJson["pksm-bridge"].is_boolean())) {
-            mJson["pksm-bridge"] = false;
-            updateJson           = true;
-        }
         if (!(mJson.contains("ftp-enabled") && mJson["ftp-enabled"].is_boolean())) {
             mJson["ftp-enabled"] = false;
             updateJson           = true;
@@ -183,11 +179,6 @@ std::vector<std::string> Configuration::additionalDeviceSaveFolders(u64 id)
     return folders == mAdditionalDeviceSaveFolders.end() ? emptyvec : folders->second;
 }
 
-bool Configuration::isPKSMBridgeEnabled(void)
-{
-    return PKSMBridgeEnabled;
-}
-
 void Configuration::save(void)
 {
     std::string writeData = mJson.dump(2);
@@ -249,8 +240,6 @@ void Configuration::parse(void)
         mAdditionalDeviceSaveFolders.emplace(strtoull(it.key().c_str(), NULL, 16), sfolders);
     }
 
-    // parse PKSM Bridge flag
-    PKSMBridgeEnabled = mJson["pksm-bridge"];
     // parse FTP flag
     FTPEnabled = mJson["ftp-enabled"];
     // parse confirm-restore flag
@@ -322,13 +311,6 @@ void Configuration::setFavorite(u64 id, bool favorite)
     for (u64 fav : mFavoriteIds) {
         mJson["favorites"].push_back(hexId(fav));
     }
-    save();
-}
-
-void Configuration::setPKSMBridgeEnabled(bool enabled)
-{
-    PKSMBridgeEnabled    = enabled;
-    mJson["pksm-bridge"] = enabled;
     save();
 }
 

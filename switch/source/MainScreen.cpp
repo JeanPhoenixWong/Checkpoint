@@ -156,7 +156,6 @@ namespace {
 
 MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, input)
 {
-    pksmBridge     = false;
     selectionTimer = 0;
     snprintf(ver, sizeof(ver), "v%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
 
@@ -195,7 +194,6 @@ void MainScreen::setSaveTypeFilter(saveTypeFilter_t filter)
     this->index(CELLS, 0);
     backupScrollEnabled = false;
     MS::clearSelectedEntries();
-    setPKSMBridgeFlag(false);
 }
 
 void MainScreen::draw() const
@@ -365,9 +363,8 @@ void MainScreen::draw() const
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
-            const bool pksm = getPKSMBridgeFlag() && mSaveTypeFilter == FILTER_SAVES;
-            drawActionButton(COL_X, BTN_BACKUP_Y, pksm ? "Send" : "Backup", "L", true);
-            drawActionButton(COL_X, BTN_RESTORE_Y, pksm ? "Receive" : "Restore", "R", false);
+            drawActionButton(COL_X, BTN_BACKUP_Y, "Backup", "L", true);
+            drawActionButton(COL_X, BTN_RESTORE_Y, "Restore", "R", false);
         }
     }
     else {
@@ -515,8 +512,7 @@ void MainScreen::updateSelector(const InputState& input)
     }
 
     if (!backupScrollEnabled) {
-        size_t count    = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter);
-        size_t oldindex = hid.index();
+        size_t count = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter);
         if (sidebarFocused && (input.kDown & (HidNpadButton_Right | HidNpadButton_B))) {
             sidebarFocused   = false;
             sidebarExitFrame = true;
@@ -555,9 +551,6 @@ void MainScreen::updateSelector(const InputState& input)
         }
 
         backupList->resetIndex();
-        if (hid.index() != oldindex) {
-            setPKSMBridgeFlag(false);
-        }
     }
     else {
         backupList->updateSelection();
@@ -677,19 +670,6 @@ void MainScreen::handleEvents(const InputState& input)
             this->index(TITLES, 0);
             this->index(CELLS, 0);
             MS::clearSelectedEntries(); // filtered indices belong to the old account
-            setPKSMBridgeFlag(false);
-        }
-    }
-
-    // handle PKSM bridge (only for account saves). The per-frame Title copy
-    // (strings + two path vectors) is gated behind the L+R hold so nothing is
-    // rebuilt on the frames no shoulder combo is held.
-    if (mSaveTypeFilter == FILTER_SAVES && Configuration::getInstance().isPKSMBridgeEnabled() && !getPKSMBridgeFlag() && (kheld & HidNpadButton_L) &&
-        (kheld & HidNpadButton_R)) {
-        Title title;
-        TitleCatalog::get().getTitle(title, g_currentUId, rawIndex());
-        if (title.saveDataType() != FsSaveDataType_Bcat && title.saveDataType() != FsSaveDataType_Device && isPKSMBridgeTitle(title.id())) {
-            setPKSMBridgeFlag(true);
         }
     }
 
@@ -702,7 +682,6 @@ void MainScreen::handleEvents(const InputState& input)
         this->index(TITLES, 0);
         this->index(CELLS, 0);
         MS::clearSelectedEntries(); // filtered indices belong to the old account
-        setPKSMBridgeFlag(false);
     }
 
     // Handle touching the backup list / panel region
@@ -724,30 +703,11 @@ void MainScreen::handleEvents(const InputState& input)
         if (backupScrollEnabled) {
             // If the "New..." entry is selected...
             if (0 == this->index(CELLS)) {
-                if (!getPKSMBridgeFlag()) {
-                    doBackup(rawIndex(), this->index(CELLS));
-                    TransferJob::get().start();
-                }
+                doBackup(rawIndex(), this->index(CELLS));
+                TransferJob::get().start();
             }
             else {
-                if (getPKSMBridgeFlag()) {
-                    // Receiving overwrites the save: confirm first, like the R-press path.
-                    currentOverlay = std::make_shared<YesNoOverlay>(
-                        *this, "Receive save from PKSM?",
-                        [this]() {
-                            auto result = recvFromPKSMBridge(rawIndex(), g_currentUId, this->index(CELLS));
-                            if (std::get<0>(result)) {
-                                currentOverlay = std::make_shared<InfoOverlay>(*this, std::get<2>(result));
-                            }
-                            else {
-                                currentOverlay = std::make_shared<ErrorOverlay>(*this, std::get<1>(result), std::get<2>(result));
-                            }
-                        },
-                        [this]() { this->removeOverlay(); });
-                }
-                else {
-                    requestRestoreSelected();
-                }
+                requestRestoreSelected();
             }
         }
         else {
@@ -766,7 +726,6 @@ void MainScreen::handleEvents(const InputState& input)
         backupScrollEnabled = false;
         entryType(TITLES);
         MS::clearSelectedEntries();
-        setPKSMBridgeFlag(false);
     }
 
     // Handle pressing X
@@ -808,7 +767,6 @@ void MainScreen::handleEvents(const InputState& input)
         }
         entryType(TITLES);
         MS::addSelectedEntry(this->index(TITLES));
-        setPKSMBridgeFlag(false);
     }
 
     // Handle holding Y
@@ -844,55 +802,21 @@ void MainScreen::handleEvents(const InputState& input)
             MS::clearSelectedEntries();
         }
         else if (backupScrollEnabled) {
-            if (getPKSMBridgeFlag()) {
-                if (this->index(CELLS) != 0) {
-                    currentOverlay = std::make_shared<YesNoOverlay>(
-                        *this, "Send save to PKSM?",
-                        [this]() {
-                            auto result = sendToPKSMBridge(rawIndex(), g_currentUId, this->index(CELLS));
-                            if (std::get<0>(result)) {
-                                currentOverlay = std::make_shared<InfoOverlay>(*this, std::get<2>(result));
-                            }
-                            else {
-                                currentOverlay = std::make_shared<ErrorOverlay>(*this, std::get<1>(result), std::get<2>(result));
-                            }
-                        },
-                        [this]() { this->removeOverlay(); });
-                }
-            }
-            else {
-                currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Backup selected save?",
-                    [this]() {
-                        doBackup(rawIndex(), this->index(CELLS));
-                        TransferJob::get().start();
-                    },
-                    [this]() { this->removeOverlay(); });
-            }
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, "Backup selected save?",
+                [this]() {
+                    doBackup(rawIndex(), this->index(CELLS));
+                    TransferJob::get().start();
+                },
+                [this]() { this->removeOverlay(); });
         }
     }
 
     // Handle pressing/touching R
     if (buttonRestore->released() || (kdown & HidNpadButton_R)) {
         if (backupScrollEnabled) {
-            if (getPKSMBridgeFlag() && this->index(CELLS) != 0) {
-                currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Receive save from PKSM?",
-                    [this]() {
-                        auto result = recvFromPKSMBridge(rawIndex(), g_currentUId, this->index(CELLS));
-                        if (std::get<0>(result)) {
-                            currentOverlay = std::make_shared<InfoOverlay>(*this, std::get<2>(result));
-                        }
-                        else {
-                            currentOverlay = std::make_shared<ErrorOverlay>(*this, std::get<1>(result), std::get<2>(result));
-                        }
-                    },
-                    [this]() { this->removeOverlay(); });
-            }
-            else {
-                if (this->index(CELLS) != 0) {
-                    requestRestoreSelected();
-                }
+            if (this->index(CELLS) != 0) {
+                requestRestoreSelected();
             }
         }
     }
@@ -932,14 +856,4 @@ void MainScreen::index(entryType_t type, size_t i)
     else {
         backupList->setIndex(i);
     }
-}
-
-bool MainScreen::getPKSMBridgeFlag(void) const
-{
-    return Configuration::getInstance().isPKSMBridgeEnabled() ? pksmBridge : false;
-}
-
-void MainScreen::setPKSMBridgeFlag(bool f)
-{
-    pksmBridge = f;
 }

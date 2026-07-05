@@ -203,17 +203,6 @@ void SettingsScreen::rebuildRows(void)
             };
             mRows.push_back(std::move(ftp));
 
-            Row pksm;
-            pksm.title      = "PKSM bridge";
-            pksm.subtitle   = "Allow PKSM to send and receive Pokémon saves";
-            pksm.control    = Control::Toggle;
-            pksm.getOn      = [&cfg]() { return cfg.isPKSMBridgeEnabled(); };
-            pksm.onActivate = [this, &cfg]() {
-                cfg.setPKSMBridgeEnabled(!cfg.isPKSMBridgeEnabled());
-                flashSaved();
-            };
-            mRows.push_back(std::move(pksm));
-
             Row confirmRestore;
             confirmRestore.title      = "Confirm before restore";
             confirmRestore.subtitle   = "Ask before overwriting a save on restore";
@@ -250,7 +239,6 @@ void SettingsScreen::rebuildRows(void)
                 return ip.empty() ? "· running" : "· running on " + ip + ":50000";
             };
             mRows.push_back(std::move(ftp));
-            mRows.push_back(info("PKSM bridge", cfg.isPKSMBridgeEnabled() ? "Enabled" : "Disabled"));
 
             // Address of the built-in HTTP log server (parity with the 3DS build).
             // Open it from any browser on the same network to read the logs.

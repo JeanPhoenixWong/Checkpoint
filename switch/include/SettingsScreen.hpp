@@ -44,7 +44,7 @@ public:
     enum class Category { General, Library, SaveFolders, Connectivity, Logs, About, COUNT };
 
     // One control per row. Segmented (Theme), Spinner (Default sort), Toggle
-    // (FTP/PKSM); ActionPill/Static are used by the later-phase tabs.
+    // (FTP); ActionPill/Static are used by the later-phase tabs.
     enum class Control { Segmented, Spinner, Toggle, ActionPill, Static };
 
     // A single settings row. `options`/`getIndex` back Segmented+Spinner;
