@@ -25,12 +25,42 @@
 
 #define lstat stat
 #define POLL_UNKNOWN    (~(POLLIN|POLLPRI|POLLOUT))
+/* Buffer sizes are overridable from the build system: the 3DS heap is far
+ * tighter than the Switch's, and each connected session embeds these buffers
+ * (~1.1 MB by default). The 3DS Makefile passes -DFILE_BUFFERSIZE=262144 and
+ * -DXFER_BUFFERSIZE/-DSOCK_BUFFERSIZE=32768 (the sizes classic 3DS ftpd used;
+ * SOCU rejects SO_RCVBUF/SO_SNDBUF of 65536). */
+#ifndef XFER_BUFFERSIZE
 #define XFER_BUFFERSIZE 65536
+#endif
+#ifndef SOCK_BUFFERSIZE
 #define SOCK_BUFFERSIZE 65536
+#endif
+#ifndef FILE_BUFFERSIZE
 #define FILE_BUFFERSIZE 1048576
+#endif
 #define CMD_BUFFERSIZE  4096
 #define LISTEN_PORT     50000
 #define DATA_PORT       0 /* ephemeral port */
+
+/* Optional diagnostic hook, only wired on the 3DS build (ftpserver.cpp provides
+ * the strong definition forwarding to Checkpoint's logger). Weak no-op default
+ * so the core still links standalone; compiled out entirely elsewhere. */
+#ifdef __3DS__
+__attribute__((weak)) void ftp_log(const char *msg) { (void)msg; }
+#define FTP_LOG(...)                                                                                                                                   \
+  do                                                                                                                                                   \
+  {                                                                                                                                                    \
+    char _ftp_log_buf[192];                                                                                                                            \
+    snprintf(_ftp_log_buf, sizeof(_ftp_log_buf), __VA_ARGS__);                                                                                         \
+    ftp_log(_ftp_log_buf);                                                                                                                             \
+  } while(0)
+#else
+#define FTP_LOG(...)                                                                                                                                   \
+  do                                                                                                                                                   \
+  {                                                                                                                                                    \
+  } while(0)
+#endif
 
 typedef struct ftp_session_t ftp_session_t;
 
@@ -231,7 +261,20 @@ static time_t             start_time = 0;
  *  @returns next data port
  */
 static in_port_t next_data_port(void) {
+#ifdef __3DS__
+  /* libctru's SOCU bind() rejects port 0 with EINVAL — it has no ephemeral-port
+   * support — so hand out an explicit, rotating port for PASV instead. Use the
+   * 5001-9999 range that classic 3DS ftpd shipped with (proven on SOCU; the
+   * first attempt used 49152+ and inbound data on the accepted socket never
+   * arrived). Connected sockets are closed with SO_LINGER 0 (see
+   * ftp_closesocket) so ports don't sit in TIME_WAIT between reuses. */
+  static in_port_t next = 5001;
+  if(next < 5001 || next >= 10000)
+    next = 5001;
+  return next++;
+#else
   return 0; /* ephemeral port */
+#endif
 }
 
 /*! set a socket to non-blocking
@@ -274,7 +317,10 @@ static int ftp_set_socket_options(int fd) {
                   &sock_buffersize, sizeof(sock_buffersize));
   if(rc != 0)
   {
-    return -1;
+    /* SO_RCVBUF/SO_SNDBUF are optional throughput tuning. libctru's SOCU may
+     * reject them; that must not abort the data connection (it was previously
+     * fatal, turning every PASV/PORT into a 451/425). Log and carry on. */
+    FTP_LOG("FTP setsockopt SO_RCVBUF failed errno=%d (ignored)", errno);
   }
 
   /* increase send buffer size */
@@ -282,7 +328,7 @@ static int ftp_set_socket_options(int fd) {
                   &sock_buffersize, sizeof(sock_buffersize));
   if(rc != 0)
   {
-    return -1;
+    FTP_LOG("FTP setsockopt SO_SNDBUF failed errno=%d (ignored)", errno);
   }
 
   return 0;
@@ -311,14 +357,17 @@ static void ftp_closesocket(int  fd, bool connected) {
     pollinfo.events  = POLLIN;
     pollinfo.revents = 0;
     poll(&pollinfo, 1, 250);
-  }
 
-  /* set linger to 0 */
-  struct linger linger;
-  linger.l_onoff  = 1;
-  linger.l_linger = 0;
-  setsockopt(fd, SOL_SOCKET, SO_LINGER,
-                  &linger, sizeof(linger));
+    /* set linger to 0: abort-close so the (rotating PASV) port doesn't sit in
+     * TIME_WAIT. Only connected sockets enter TIME_WAIT; applying this to the
+     * PASV *listen* socket too proved harmful on 3DS SOCU (inbound data on the
+     * just-accepted child socket stopped flowing), so keep it connected-only. */
+    struct linger linger;
+    linger.l_onoff  = 1;
+    linger.l_linger = 0;
+    setsockopt(fd, SOL_SOCKET, SO_LINGER,
+                    &linger, sizeof(linger));
+  }
 
   /* close socket */
   close(fd);
@@ -1074,6 +1123,7 @@ static int ftp_session_accept(ftp_session_t *session) {
     new_fd = accept(session->pasv_fd, (struct sockaddr*)&addr, &addrlen);
     if(new_fd < 0)
     {
+      FTP_LOG("FTP PASV accept() failed errno=%d", errno);
       ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
       ftp_send_response(session, 425, "Failed to establish connection\r\n");
       return -1;
@@ -1083,6 +1133,7 @@ static int ftp_session_accept(ftp_session_t *session) {
     rc = ftp_set_socket_nonblocking(new_fd);
     if(rc != 0)
     {
+      FTP_LOG("FTP PASV set-nonblocking failed errno=%d", errno);
       ftp_closesocket(new_fd, true);
       ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
       ftp_send_response(session, 425, "Failed to establish connection\r\n");
@@ -1090,7 +1141,16 @@ static int ftp_session_accept(ftp_session_t *session) {
     }
 
     /* we are ready to transfer data */
+    FTP_LOG("FTP PASV data connection established fd=%d", new_fd);
+#ifdef __3DS__
+    /* keep the PASV listen socket open until the transfer finishes: closing it
+     * right after accept() has been observed on SOCU to stall inbound data on
+     * the accepted child socket (STOR hangs after 150). Every transfer
+     * completion path uses CLOSE_PASV | CLOSE_DATA, so it is torn down there. */
+    ftp_session_set_state(session, DATA_TRANSFER_STATE, 0);
+#else
     ftp_session_set_state(session, DATA_TRANSFER_STATE, CLOSE_PASV);
+#endif
     session->data_fd = new_fd;
 
     return 0;
@@ -1476,6 +1536,7 @@ static ftp_session_t* ftp_session_poll(ftp_session_t *session) {
           /* we need to transfer data */
           if(pollinfo[1].revents & (POLLERR|POLLHUP))
           {
+            FTP_LOG("FTP data socket POLLERR/POLLHUP revents=0x%x", pollinfo[1].revents);
             ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
             ftp_send_response(session, 426, "Data connection failed\r\n");
           }
@@ -1485,6 +1546,17 @@ static ftp_session_t* ftp_session_poll(ftp_session_t *session) {
       }
     }
   }
+
+#ifdef __3DS__
+  /* SOCU's poll() does not reliably report POLLIN on PASV data sockets
+   * (uploads stalled forever: accept + 150 succeeded, then readiness never
+   * arrived, while the command/listen sockets polled fine). The data socket is
+   * non-blocking, so attempt the transfer on every tick and let EWOULDBLOCK be
+   * the "not ready" signal; poll() above still services the command socket and
+   * any data-socket errors it does manage to report. */
+  if(rc >= 0 && session->cmd_fd >= 0 && session->state == DATA_TRANSFER_STATE)
+    ftp_session_transfer(session);
+#endif
 
   /* still connected to peer; return next session */
   if(session->cmd_fd >= 0)
@@ -1893,21 +1965,47 @@ static loop_status_t store_transfer(ftp_session_t *session) {
   {
     /* we have written all the received data, so try to get some more */
     rc = recv(session->data_fd, session->buffer, sizeof(session->buffer), 0);
+
+    /* diagnostic: log the first successful read of a transfer, and a
+     * rate-limited heartbeat while the socket keeps reporting "no data yet",
+     * so stalls are visible in the logs without spamming every 10 ms tick */
+    if(session->filepos == 0)
+    {
+      static unsigned would_block_count;
+      if(rc > 0)
+      {
+        FTP_LOG("FTP STOR first data received rc=%d fd=%d", (int)rc, session->data_fd);
+        would_block_count = 0;
+      }
+      else if(rc < 0 && (would_block_count++ % 512) == 0)
+        FTP_LOG("FTP STOR recv pending errno=%d count=%u fd=%d", errno, would_block_count, session->data_fd);
+    }
+
     if(rc <= 0)
     {
       /* can't read any more data */
       if(rc < 0)
       {
-        if(errno == EWOULDBLOCK)
+        /* No data ready yet on the non-blocking socket, or the read was
+         * interrupted: yield and resume on the next poll. Keep the connection.
+         * EAGAIN is checked alongside EWOULDBLOCK (equal on this toolchain, but
+         * spelled out so a platform where they differ still behaves). */
+        if(errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
           return LOOP_EXIT;
       }
 
       ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
 
       if(rc == 0)
+      {
+        FTP_LOG("FTP STOR complete, %lld bytes written", (long long)session->filepos);
         ftp_send_response(session, 226, "OK\r\n");
+      }
       else
+      {
+        FTP_LOG("FTP STOR recv failed rc=%d errno=%d", (int)rc, errno);
         ftp_send_response(session, 426, "Connection broken during transfer\r\n");
+      }
       return LOOP_EXIT;
     }
 
@@ -1920,6 +2018,7 @@ static loop_status_t store_transfer(ftp_session_t *session) {
   if(rc <= 0)
   {
     /* error writing data */
+    FTP_LOG("FTP STOR write failed rc=%d errno=%d filepos=%lld", (int)rc, errno, (long long)session->filepos);
     ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
     ftp_send_response(session, 451, "Failed to write file\r\n");
     return LOOP_EXIT;
@@ -1966,6 +2065,7 @@ static void ftp_xfer_file(ftp_session_t *session, const char *args, xfer_file_mo
   if(rc != 0)
   {
     /* error opening the file */
+    FTP_LOG("FTP %s open '%s' failed errno=%d", mode == XFER_FILE_RETR ? "RETR" : "STOR", session->buffer, errno);
     ftp_session_set_state(session, COMMAND_STATE, CLOSE_PASV | CLOSE_DATA);
     ftp_send_response(session, 450, "failed to open file\r\n");
     return;
@@ -2742,18 +2842,18 @@ FTP_DECLARE(PASV)
   session->pasv_fd = socket(AF_INET, SOCK_STREAM, 0);
   if(session->pasv_fd < 0)
   {
+    FTP_LOG("FTP PASV socket() failed errno=%d", errno);
     ftp_send_response(session, 451, "\r\n");
     return;
   }
 
-  /* set the socket options */
-  rc = ftp_set_socket_options(session->pasv_fd);
-  if(rc != 0)
+  /* set the socket options (non-fatal on failure) */
+  ftp_set_socket_options(session->pasv_fd);
+
+  /* allow immediate reuse of a rotating data port that was just released */
   {
-    /* failed to set socket options */
-    ftp_session_close_pasv(session);
-    ftp_send_response(session, 451, "\r\n");
-    return;
+    int yes = 1;
+    setsockopt(session->pasv_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
   }
 
   /* grab a new port */
@@ -2765,6 +2865,7 @@ FTP_DECLARE(PASV)
   if(rc != 0)
   {
     /* failed to bind */
+    FTP_LOG("FTP PASV bind() failed errno=%d", errno);
     ftp_session_close_pasv(session);
     ftp_send_response(session, 451, "\r\n");
     return;
@@ -2775,6 +2876,7 @@ FTP_DECLARE(PASV)
   if(rc != 0)
   {
     /* failed to listen */
+    FTP_LOG("FTP PASV listen() failed errno=%d", errno);
     ftp_session_close_pasv(session);
     ftp_send_response(session, 451, "\r\n");
     return;
@@ -2788,6 +2890,7 @@ FTP_DECLARE(PASV)
     if(rc != 0)
     {
       /* failed to get socket address */
+      FTP_LOG("FTP PASV getsockname() failed errno=%d", errno);
       ftp_session_close_pasv(session);
       ftp_send_response(session, 451, "\r\n");
       return;

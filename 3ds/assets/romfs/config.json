@@ -16,6 +16,7 @@
   "scan_cart": false,
   "transfer_enabled": false,
   "confirm_restore": true,
+  "ftp-enabled": false,
   "theme": "dark",
   "version": 5
 }

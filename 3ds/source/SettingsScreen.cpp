@@ -28,6 +28,7 @@
 #include "FolderBrowserOverlay.hpp"
 #include "TitlePickerOverlay.hpp"
 #include "configuration.hpp"
+#include "ftpserver.hpp"
 #include "glyphs.hpp"
 #include "gui.hpp"
 #include "loader.hpp"
@@ -55,7 +56,7 @@ namespace {
             "Cartridge scan, system saves, Wi-Fi transfer and restore confirmation. Changes write straight to config.json on your SD card."},
         {"L", "Library", "Favorites and hidden titles - the filter and favorites lists."},
         {"F", "Folders", "Per-title extra save and extdata folders on your SD card."},
-        {"N", "Network", "Wi-Fi send / receive of backups between consoles."},
+        {"N", "Network", "FTP server, Wi-Fi transfer status and this console's network addresses."},
         {"i", "About", "Version, credits and storage usage."},
     };
     constexpr size_t SECTION_COUNT = sizeof(SECTIONS) / sizeof(SECTIONS[0]);
@@ -127,7 +128,7 @@ SettingsScreen::SettingsScreen(std::shared_ptr<Screen> parent) : mParent(std::mo
 
 bool SettingsScreen::sectionInteractive(size_t section) const
 {
-    return section == SEC_GENERAL || section == SEC_LIBRARY || section == SEC_FOLDERS;
+    return section == SEC_GENERAL || section == SEC_LIBRARY || section == SEC_FOLDERS || section == SEC_NETWORK;
 }
 
 size_t SettingsScreen::contentRowCount(size_t section) const
@@ -139,6 +140,8 @@ size_t SettingsScreen::contentRowCount(size_t section) const
             return mLibraryRows.size();
         case SEC_FOLDERS:
             return mFolderRows.size();
+        case SEC_NETWORK:
+            return 1; // the single FTP-server toggle
         default:
             return 0;
     }
@@ -350,26 +353,35 @@ void SettingsScreen::drawLibrary(void) const
 void SettingsScreen::drawNetwork(void) const
 {
     Configuration& cfg = Configuration::getInstance();
-    const bool on      = cfg.transferEnabled();
-    int y              = 40;
-    auto field         = [&](const char* label, const std::string& value, u32 valColor) {
+
+    // Row 0: the interactive FTP-server toggle.
+    const bool ftpOn = cfg.isFTPEnabled();
+    drawToggleRow(26, "FTP server", "Serve the SD card over FTP (port 50000)", ftpOn, contentFocus && contentCursor == 0);
+
+    int y      = 68;
+    auto field = [&](const char* label, const std::string& value, u32 valColor) {
         TextPool::get().draw(label, 20, y, 0.4f, COLOR_FAINT);
         TextPool::get().draw(value, 20, y + 14, 0.46f, valColor);
-        y += 44;
+        y += 38;
     };
-    field("Wi-Fi transfer", on ? "Enabled" : "Disabled", on ? COLOR_TEAL : COLOR_MUTED);
+
+    std::string ftpAddress = FTPServer::getAddress();
+    field("FTP address", ftpOn ? (ftpAddress.empty() ? "Unavailable" : ftpAddress) : "Disabled",
+        ftpOn && !ftpAddress.empty() ? COLOR_TEAL : COLOR_MUTED);
+
+    const bool transferOn = cfg.transferEnabled();
+    field("Wi-Fi transfer", transferOn ? "Enabled" : "Disabled", transferOn ? COLOR_TEAL : COLOR_MUTED);
 
     std::string address = Server::getAddress();
-
     field("In memory logs", address.empty() ? "Unavailable" : address + "/logs/memory", address.empty() ? COLOR_MUTED : COLOR_TEXT);
-
     field("Complete logs", address.empty() ? "Unavailable" : address + "/logs/file", address.empty() ? COLOR_MUTED : COLOR_TEXT);
 
-    TextPool::get().draw("Send / receive", 20, y, 0.4f, COLOR_FAINT);
-    TextPool::get().drawWrapped(
-        "Use the Transfer button on the main screen to send a backup or wait to receive one.", 20, y + 14, 0.4f, COLOR_MUTED, 280);
-
-    drawHints(320, 223, std::string(GLYPH_B) + " Back");
+    if (contentFocus) {
+        drawHints(320, 223, std::string(GLYPH_A) + " Toggle     " + GLYPH_B + " Back");
+    }
+    else {
+        drawHints(320, 223, std::string(GLYPH_A) + " Edit");
+    }
 }
 
 void SettingsScreen::drawAbout(void) const
@@ -597,6 +609,18 @@ void SettingsScreen::update(const InputState& input)
                     savedTimer    = SAVED_FLASH_FRAMES;
                     rebuildRows();
                 }
+            }
+            else if (kDown & KEY_B) {
+                contentFocus = false;
+            }
+        }
+        else if (sel == SEC_NETWORK) {
+            if (kDown & KEY_A) {
+                // Live toggle: the FTP loop thread reads isFTPEnabled() each
+                // iteration, so this takes effect without a restart. The SD
+                // write is deferred to commit() on leaving Settings.
+                Configuration::getInstance().setFTPEnabled(!Configuration::getInstance().isFTPEnabled());
+                savedTimer = SAVED_FLASH_FRAMES;
             }
             else if (kDown & KEY_B) {
                 contentFocus = false;

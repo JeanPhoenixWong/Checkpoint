@@ -40,7 +40,7 @@
 //   General  toggles that map 1:1 to config.json (interactive)
 //   Library  favorites + hidden (filter) titles, with remove (interactive)
 //   Folders  per-title extra save / extdata folders, with remove (interactive)
-//   Network  Wi-Fi transfer status + this console's address (informational)
+//   Network  FTP-server toggle (interactive) + Wi-Fi transfer / address info
 //   About    version, credits, storage usage (informational)
 //
 // Focus model mirrors the main page: the section list on top holds focus first

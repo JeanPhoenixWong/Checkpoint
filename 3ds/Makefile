@@ -39,10 +39,10 @@ TARGET			:=	$(subst $e ,_,$(notdir $(APP_TITLE)))
 OUTDIR			:=	out
 BUILD			:=	build
 FORMATSOURCES	:=	source ../common
-SOURCES			:=	$(FORMATSOURCES) ../3rd-party/sha256
+SOURCES			:=	$(FORMATSOURCES) ../3rd-party/sha256 ../3rd-party/ftp
 DATA			:=	data
 FORMATINCLUDES	:=	include ../common
-INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256
+INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256 ../3rd-party/ftp
 GRAPHICS		:=	assets/gfx
 ROMFS			:=	assets/romfs
 GFXBUILD		:=	$(ROMFS)/gfx
@@ -79,7 +79,10 @@ CFLAGS	:=	-g -gdwarf-4 -Wall -Wextra -Wno-psabi -O3 -mword-relocations -flto=aut
 			-DVERSION_MICRO=${VERSION_MICRO} \
 			-DGIT_REV=\"${GIT_REV}\" \
 			-DJSON_HAS_FILESYSTEM=0 \
-			-DJSON_HAS_EXPERIMENTAL_FILESYSTEM=0
+			-DJSON_HAS_EXPERIMENTAL_FILESYSTEM=0 \
+			-DFILE_BUFFERSIZE=262144 \
+			-DXFER_BUFFERSIZE=32768 \
+			-DSOCK_BUFFERSIZE=32768
 
 CFLAGS	+=	$(INCLUDE) -DARM11 -D__3DS__ -D_GNU_SOURCE=1
 

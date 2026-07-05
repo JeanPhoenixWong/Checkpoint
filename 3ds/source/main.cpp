@@ -29,6 +29,7 @@
 #include "backupsize.hpp"
 #include "colors.hpp"
 #include "configuration.hpp"
+#include "ftpserver.hpp"
 #include "loader.hpp"
 #include "server.hpp"
 #include "textpool.hpp"
@@ -112,8 +113,12 @@ int main()
     // early-error exits (Threads::exit is idempotent).
     TitleCatalog::clearCartScanFlag();
     Server::requestStop();
+    FTPServer::requestStop();
     BackupSizeCache::shutdownStatic();
     Threads::exit();
+    // ftp_exit() closes the listen socket / live sessions; must run only after
+    // the loop thread above has been joined, never while it may be in ftp_loop.
+    FTPServer::exit();
 
     exit(0);
 }

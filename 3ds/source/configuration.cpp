@@ -79,6 +79,10 @@ Configuration::Configuration(void)
                     (*mJson)["confirm_restore"] = true;
                     updateJson                  = true;
                 }
+                if (!(mJson->contains("ftp-enabled") && (*mJson)["ftp-enabled"].is_boolean())) {
+                    (*mJson)["ftp-enabled"] = false;
+                    updateJson              = true;
+                }
                 if (!(mJson->contains("theme") && (*mJson)["theme"].is_string())) {
                     (*mJson)["theme"] = "dark";
                     updateJson        = true;
@@ -152,6 +156,7 @@ Configuration::Configuration(void)
             mScanCard        = (*mJson)["scan_cart"];
             mTransferEnabled = (*mJson)["transfer_enabled"];
             mConfirmRestore  = (*mJson)["confirm_restore"];
+            mFTPEnabled      = (*mJson)["ftp-enabled"];
             mTheme           = (*mJson)["theme"];
 
             // parse additional save folders
@@ -267,6 +272,11 @@ bool Configuration::confirmRestore(void)
     return mConfirmRestore;
 }
 
+bool Configuration::isFTPEnabled(void)
+{
+    return mFTPEnabled;
+}
+
 std::string Configuration::theme(void)
 {
     return mTheme;
@@ -305,6 +315,13 @@ void Configuration::setConfirmRestore(bool v)
     mConfirmRestore             = v;
     (*mJson)["confirm_restore"] = v;
     mDirty                      = true;
+}
+
+void Configuration::setFTPEnabled(bool v)
+{
+    mFTPEnabled             = v;
+    (*mJson)["ftp-enabled"] = v;
+    mDirty                  = true;
 }
 
 void Configuration::setTheme(const std::string& v)

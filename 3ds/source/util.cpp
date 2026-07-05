@@ -26,6 +26,7 @@
 
 #include "util.hpp"
 #include "backupsize.hpp"
+#include "ftpserver.hpp"
 #include "loader.hpp"
 #include "server.hpp"
 #include "thread.hpp"
@@ -108,6 +109,8 @@ Result servicesInit(void)
             ATEXIT(socExit);
             Server::init();
             ATEXIT(Server::exit);
+            FTPServer::init();
+            ATEXIT(FTPServer::exit);
         }
         else {
             Logging::warning("socInit failed");
@@ -131,6 +134,7 @@ Result servicesInit(void)
     ATEXIT(Threads::exit);
     ATEXIT(BackupSizeCache::shutdownStatic);
     ATEXIT(Server::requestStop);
+    ATEXIT(FTPServer::requestStop);
 
     // Verify TWLN access up front so a missing permission degrades to a logged,
     // persisted opt-out instead of a per-title failure storm during the scan.
