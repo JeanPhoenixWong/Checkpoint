@@ -59,8 +59,10 @@ namespace {
             return target.fullPath(cellIndex);
         }
         std::string suggestion = DateTime::dateTimeStr();
-        std::u16string name =
-            MS::multipleSelectionEnabled() ? StringUtils::UTF8toUTF16(suggestion.c_str()) : KeyboardManager::get().keyboard(suggestion);
+        // Quick backup (or multi-select) skips the swkbd prompt and takes the
+        // timestamp directly
+        const bool skipKeyboard = MS::multipleSelectionEnabled() || Configuration::getInstance().quickBackup();
+        std::u16string name     = skipKeyboard ? StringUtils::UTF8toUTF16(suggestion.c_str()) : KeyboardManager::get().keyboard(suggestion);
         if (name.empty()) {
             return std::nullopt;
         }

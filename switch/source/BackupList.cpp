@@ -27,6 +27,7 @@
 #include "BackupList.hpp"
 #include "backupsize.hpp"
 #include "colors.hpp"
+#include "configuration.hpp"
 #include "io.hpp"
 #include "main.hpp"
 #include "savedatasource.hpp"
@@ -289,7 +290,9 @@ std::optional<std::string> BackupList::chooseDst(Title& title, size_t cellIndex,
     }
     std::string suggestion = backupSuggestion(title);
     std::string name;
-    if (MS::multipleSelectionEnabled()) {
+    // Quick backup (or multi-select) skips the keyboard prompt and takes the
+    // timestamp directly
+    if (MS::multipleSelectionEnabled() || Configuration::getInstance().isQuickBackupEnabled()) {
         name = suggestion;
     }
     else if (KeyboardManager::get().isSystemKeyboardAvailable().first) {

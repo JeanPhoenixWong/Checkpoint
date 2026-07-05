@@ -54,6 +54,7 @@ public:
     bool transferEnabled(void);
     bool confirmRestore(void);
     bool isFTPEnabled(void);
+    bool quickBackup(void);
     // "dark" (default) or "light". Selects the color palette; see Colors::apply.
     std::string theme(void);
     std::vector<std::u16string> additionalSaveFolders(u64 id);
@@ -74,6 +75,7 @@ public:
     void setTransferEnabled(bool v);
     void setConfirmRestore(bool v);
     void setFTPEnabled(bool v);
+    void setQuickBackup(bool v);
     void setTheme(const std::string& v);
 
     // Flushes pending changes to config.json (no-op when nothing is dirty).
@@ -109,6 +111,7 @@ private:
     std::unordered_map<u64, std::vector<std::u16string>> mAdditionalSaveFolders, mAdditionalExtdataFolders;
     bool mNandSaves = false, mDSiWareSaves = false, mScanCard = false, mTransferEnabled = false, mConfirmRestore = true;
     bool mFTPEnabled     = false;
+    bool mQuickBackup    = false;
     std::string mTheme   = "dark";
     std::string BASEPATH = "/3ds/Checkpoint/config.json";
     size_t oldSize       = 0;

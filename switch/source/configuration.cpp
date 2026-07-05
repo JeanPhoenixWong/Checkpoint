@@ -71,6 +71,10 @@ Configuration::Configuration(void)
             mJson["confirm-restore"] = true; // default: confirm, matching prior always-confirm behavior
             updateJson               = true;
         }
+        if (!(mJson.contains("quick-backup") && mJson["quick-backup"].is_boolean())) {
+            mJson["quick-backup"] = false;
+            updateJson            = true;
+        }
         if (!(mJson.contains("filter") && mJson["filter"].is_array())) {
             mJson["filter"] = nlohmann::json::array();
             updateJson      = true;
@@ -244,6 +248,8 @@ void Configuration::parse(void)
     FTPEnabled = mJson["ftp-enabled"];
     // parse confirm-restore flag
     mConfirmRestore = mJson.value("confirm-restore", true);
+    // parse quick-backup flag
+    mQuickBackup = mJson.value("quick-backup", false);
 
     mTheme    = mJson.value("theme", "dark");
     mSortMode = SortMode::fromConfigKey(mJson.value("sort-mode", std::string(SortMode::of(SORT_ALPHA).configKey)));
@@ -330,6 +336,18 @@ void Configuration::setConfirmRestoreEnabled(bool enabled)
 {
     mConfirmRestore          = enabled;
     mJson["confirm-restore"] = enabled;
+    save();
+}
+
+bool Configuration::isQuickBackupEnabled(void)
+{
+    return mQuickBackup;
+}
+
+void Configuration::setQuickBackupEnabled(bool enabled)
+{
+    mQuickBackup          = enabled;
+    mJson["quick-backup"] = enabled;
     save();
 }
 

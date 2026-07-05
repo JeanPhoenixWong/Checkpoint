@@ -58,6 +58,9 @@ public:
     // Whether a restore asks for a YesNo confirmation first (parity with the 3DS
     // confirm_restore setting). Default true — a restore overwrites the save.
     bool isConfirmRestoreEnabled(void);
+    // Skip the software-keyboard backup-name prompt and use the timestamp
+    // suggestion directly. Default false.
+    bool isQuickBackupEnabled(void);
     std::vector<std::string> additionalSaveFolders(u64 id);
     std::vector<std::string> additionalDeviceSaveFolders(u64 id);
     void save(void);
@@ -81,6 +84,7 @@ public:
     void setFavorite(u64 id, bool favorite);
     void setFTPEnabled(bool enabled);
     void setConfirmRestoreEnabled(bool enabled);
+    void setQuickBackupEnabled(bool enabled);
     void addAdditionalSaveFolder(u64 id, const std::string& path);
     void removeAdditionalSaveFolder(u64 id, const std::string& path);
     void addAdditionalDeviceSaveFolder(u64 id, const std::string& path);
@@ -116,6 +120,7 @@ private:
     nlohmann::json mJson;
     bool FTPEnabled;
     bool mConfirmRestore;
+    bool mQuickBackup;
     std::unordered_set<u64> mFilterIds, mFavoriteIds;
     std::unordered_map<u64, std::vector<std::string>> mAdditionalSaveFolders, mAdditionalDeviceSaveFolders;
     std::string mTheme;

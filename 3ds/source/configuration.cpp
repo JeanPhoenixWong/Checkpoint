@@ -83,6 +83,10 @@ Configuration::Configuration(void)
                     (*mJson)["ftp-enabled"] = false;
                     updateJson              = true;
                 }
+                if (!(mJson->contains("quick_backup") && (*mJson)["quick_backup"].is_boolean())) {
+                    (*mJson)["quick_backup"] = false;
+                    updateJson               = true;
+                }
                 if (!(mJson->contains("theme") && (*mJson)["theme"].is_string())) {
                     (*mJson)["theme"] = "dark";
                     updateJson        = true;
@@ -157,6 +161,7 @@ Configuration::Configuration(void)
             mTransferEnabled = (*mJson)["transfer_enabled"];
             mConfirmRestore  = (*mJson)["confirm_restore"];
             mFTPEnabled      = (*mJson)["ftp-enabled"];
+            mQuickBackup     = (*mJson)["quick_backup"];
             mTheme           = (*mJson)["theme"];
 
             // parse additional save folders
@@ -277,6 +282,11 @@ bool Configuration::isFTPEnabled(void)
     return mFTPEnabled;
 }
 
+bool Configuration::quickBackup(void)
+{
+    return mQuickBackup;
+}
+
 std::string Configuration::theme(void)
 {
     return mTheme;
@@ -322,6 +332,13 @@ void Configuration::setFTPEnabled(bool v)
     mFTPEnabled             = v;
     (*mJson)["ftp-enabled"] = v;
     mDirty                  = true;
+}
+
+void Configuration::setQuickBackup(bool v)
+{
+    mQuickBackup             = v;
+    (*mJson)["quick_backup"] = v;
+    mDirty                   = true;
 }
 
 void Configuration::setTheme(const std::string& v)

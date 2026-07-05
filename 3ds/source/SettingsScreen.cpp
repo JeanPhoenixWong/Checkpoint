@@ -68,7 +68,7 @@ namespace {
 
     // General section rows, in draw order. Row index maps 1:1 to the mutators
     // used in update(): 0 light theme, 1 scan_cart, 2 nand_saves,
-    // 3 dsiware_saves, 4 transfer_enabled, 5 confirm_restore.
+    // 3 dsiware_saves, 4 transfer_enabled, 5 confirm_restore, 6 quick_backup.
     const ToggleRow GENERAL_ROWS[] = {
         {"Light theme", "Use the light color palette"},
         {"Scan game cartridge", "Detect the inserted cart on launch"},
@@ -76,6 +76,7 @@ namespace {
         {"Show DSiWare saves", "Include DSiWare titles from NAND"},
         {"Enable Wi-Fi transfer", "Send / receive backups over network"},
         {"Confirm before restore", "Ask before overwriting a save"},
+        {"Skip backup name prompt", "Use the timestamp, no keyboard"},
     };
     constexpr size_t GENERAL_COUNT = sizeof(GENERAL_ROWS) / sizeof(GENERAL_ROWS[0]);
 
@@ -285,13 +286,16 @@ void SettingsScreen::drawTop(void) const
 void SettingsScreen::drawGeneral(void) const
 {
     Configuration& cfg             = Configuration::getInstance();
-    const bool vals[GENERAL_COUNT] = {
-        cfg.theme() == "light", cfg.shouldScanCard(), cfg.nandSaves(), cfg.dsiwareSaves(), cfg.transferEnabled(), cfg.confirmRestore()};
-    for (size_t i = 0; i < GENERAL_COUNT; i++) {
-        // Stride 32 (== row height): six rows must fit above the hint line.
-        const int rowY = 26 + (int)i * 32;
-        drawToggleRow(rowY, GENERAL_ROWS[i].name, GENERAL_ROWS[i].sub, vals[i], contentFocus && contentCursor == (int)i);
+    const bool vals[GENERAL_COUNT] = {cfg.theme() == "light", cfg.shouldScanCard(), cfg.nandSaves(), cfg.dsiwareSaves(), cfg.transferEnabled(),
+        cfg.confirmRestore(), cfg.quickBackup()};
+    // Windowed like the Library/Folders lists: more rows than fit scroll under a
+    // right-edge scrollbar. Stride 34 matches drawScrollbar's track geometry.
+    for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_COUNT; i++) {
+        const int idx  = contentOffset + i;
+        const int rowY = 30 + i * 34;
+        drawToggleRow(rowY, GENERAL_ROWS[idx].name, GENERAL_ROWS[idx].sub, vals[idx], contentFocus && contentCursor == idx);
     }
+    drawScrollbar((int)GENERAL_COUNT);
     if (contentFocus) {
         drawHints(320, 223, std::string(GLYPH_DPAD) + " Move     " + GLYPH_A + " Toggle     " + GLYPH_B + " Back");
     }
@@ -479,6 +483,9 @@ void SettingsScreen::toggleGeneral(int idx)
         case 5:
             cfg.setConfirmRestore(!cfg.confirmRestore());
             break;
+        case 6:
+            cfg.setQuickBackup(!cfg.quickBackup());
+            break;
     }
     // Cart scan, NAND saves and DSiWare saves change which titles the grid loads.
     if (idx == 1 || idx == 2 || idx == 3) {
@@ -494,12 +501,13 @@ void SettingsScreen::update(const InputState& input)
 
     // Touch toggles a General row directly, from either focus state.
     if (sel == SEC_GENERAL && (kDown & KEY_TOUCH)) {
-        for (int i = 0; i < (int)GENERAL_COUNT; i++) {
-            const int rowY = 26 + i * 32;
+        for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_COUNT; i++) {
+            const int idx  = contentOffset + i;
+            const int rowY = 30 + i * 34;
             if (input.py >= rowY && input.py < rowY + 32 && input.px >= 6 && input.px < 314) {
                 contentFocus  = true;
-                contentCursor = i;
-                toggleGeneral(i);
+                contentCursor = idx;
+                toggleGeneral(idx);
                 break;
             }
         }

@@ -13,6 +13,7 @@
   },
   "ftp-enabled": false,
   "confirm-restore": true,
+  "quick-backup": false,
   "theme": "dark",
   "sort-mode": "alpha",
   "version": 5

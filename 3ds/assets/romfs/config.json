@@ -17,6 +17,7 @@
   "transfer_enabled": false,
   "confirm_restore": true,
   "ftp-enabled": false,
+  "quick_backup": false,
   "theme": "dark",
   "version": 5
 }

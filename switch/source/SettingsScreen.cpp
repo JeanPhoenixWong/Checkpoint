@@ -104,9 +104,9 @@ namespace {
     // (a sticky header slot), so its space never depends on whether it happens to
     // carry a section — that constant top slot is what keeps scrolling from
     // jumping when a group's header row scrolls off.
-    int inlineSectionExtra(const std::string& section)
+    int inlineSectionExtra(const std::string& section, const std::string& prevSection)
     {
-        if (section.empty())
+        if (section.empty() || section == prevSection)
             return 0;
         return SECTION_GAP_ABOVE + labelSlotH();
     }
@@ -185,24 +185,6 @@ void SettingsScreen::rebuildRows(void)
             };
             mRows.push_back(std::move(sort));
 
-            Row ftp;
-            ftp.title      = "FTP server";
-            ftp.subtitle   = "Browse backups from a computer";
-            ftp.control    = Control::Toggle;
-            ftp.section    = "CONNECTIVITY";
-            ftp.getOn      = [&cfg]() { return cfg.isFTPEnabled(); };
-            ftp.onActivate = [this, &cfg]() {
-                cfg.setFTPEnabled(!cfg.isFTPEnabled());
-                flashSaved();
-            };
-            ftp.statusSuffix = [&cfg]() -> std::string {
-                if (!cfg.isFTPEnabled())
-                    return "";
-                const std::string& ip = consoleIp();
-                return ip.empty() ? "· running" : "· running on " + ip + ":50000";
-            };
-            mRows.push_back(std::move(ftp));
-
             Row confirmRestore;
             confirmRestore.title      = "Confirm before restore";
             confirmRestore.subtitle   = "Ask before overwriting a save on restore";
@@ -214,12 +196,23 @@ void SettingsScreen::rebuildRows(void)
                 flashSaved();
             };
             mRows.push_back(std::move(confirmRestore));
+
+            Row quickBackup;
+            quickBackup.title      = "Skip backup name prompt";
+            quickBackup.subtitle   = "Use the timestamp, no keyboard";
+            quickBackup.control    = Control::Toggle;
+            quickBackup.section    = "SAFETY";
+            quickBackup.getOn      = [&cfg]() { return cfg.isQuickBackupEnabled(); };
+            quickBackup.onActivate = [this, &cfg]() {
+                cfg.setQuickBackupEnabled(!cfg.isQuickBackupEnabled());
+                flashSaved();
+            };
+            mRows.push_back(std::move(quickBackup));
             break;
         }
         case Category::Connectivity: {
-            // Read-only status mirror of the toggles that live on the General
-            // tab, matching the 3DS Connectivity page. Info rows: no controls,
-            // not focusable (nothing to operate here).
+            // Log server rows are read-only status mirrors: info rows, no
+            // controls, not focusable (nothing to operate here).
             auto info = [](const char* title, std::string subtitle, const char* section = "") {
                 Row r;
                 r.title     = title;
@@ -229,9 +222,16 @@ void SettingsScreen::rebuildRows(void)
                 return r;
             };
 
-            // FTP row keeps the General-tab subtitle; the reachable address is
-            // shown as the green status suffix when the server is running.
-            Row ftp          = info("FTP server", "Browse backups from a computer", "CONNECTIVITY");
+            Row ftp;
+            ftp.title      = "FTP server";
+            ftp.subtitle   = "Browse backups from a computer";
+            ftp.control    = Control::Toggle;
+            ftp.section    = "CONNECTIVITY";
+            ftp.getOn      = [&cfg]() { return cfg.isFTPEnabled(); };
+            ftp.onActivate = [this, &cfg]() {
+                cfg.setFTPEnabled(!cfg.isFTPEnabled());
+                flashSaved();
+            };
             ftp.statusSuffix = [&cfg]() -> std::string {
                 if (!cfg.isFTPEnabled())
                     return "";
@@ -651,7 +651,7 @@ void SettingsScreen::draw(void) const
         // group. The row rect starts below whatever slot was reserved; bail before
         // drawing it (or its label) if it no longer fits the viewport.
         const bool atTop  = (i == mScroll);
-        const int extra   = atTop ? labelSlotH() : inlineSectionExtra(row.section);
+        const int extra   = atTop ? labelSlotH() : inlineSectionExtra(row.section, mRows[i - 1].section);
         const int rectTop = y + extra;
         if (i > mScroll && rectTop + ROW_H > viewBottom)
             break;
@@ -660,7 +660,7 @@ void SettingsScreen::draw(void) const
             if (!sec.empty())
                 UiKit::drawSectionLabel(ROW_X + 4, y, sec);
         }
-        else if (!row.section.empty()) {
+        else if (row.section != mRows[i - 1].section && !row.section.empty()) {
             UiKit::drawSectionLabel(ROW_X + 4, y + SECTION_GAP_ABOVE, row.section);
         }
         y = rectTop;
@@ -823,7 +823,7 @@ int SettingsScreen::lastVisibleRow(int scroll) const
     int y                = ROWS_Y0;
     int last             = scroll;
     for (int i = scroll; i < (int)mRows.size(); i++) {
-        const int rectTop = y + (i == scroll ? labelSlotH() : inlineSectionExtra(mRows[i].section));
+        const int rectTop = y + (i == scroll ? labelSlotH() : inlineSectionExtra(mRows[i].section, mRows[i - 1].section));
         // Always keep the first row; past that, stop before one overruns the bar.
         if (i > scroll && rectTop + ROW_H > viewBottom)
             break;
