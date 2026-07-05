@@ -104,8 +104,25 @@ namespace {
         return loadTitle;
     }
 
-    // Probe a legacy DS card title: rom header, banner icon, SPI card type.
-    bool probeCard(u64 id, FS_MediaType media, u8* productCode, bool& accessibleSave, bool& gba, bool& accessibleExtdata,
+    // A DS cart has no title id (AM only vends them for CTR/TWL). Without one,
+    // every cart would collide on id 0, making per-title config (favorites,
+    // hidden titles, additional save folders) meaningless. Synthesize a stable
+    // key from the 4-char ROM game code instead, tagged with a private high word
+    // that AM never emits so it can't clash with a real title id or trip the
+    // system-exclusion / update / DSi-data ranges in TitleQuirks::isSystemExcluded.
+    constexpr u64 DS_CARD_ID_MARKER = 0x0000444E00000000ULL; // 'D','N' — DS NTR
+    u64 dsCardId(const char* gameCode)
+    {
+        u32 packed = 0;
+        for (int i = 0; i < 4; i++) {
+            packed = (packed << 8) | (u8)gameCode[i];
+        }
+        return DS_CARD_ID_MARKER | packed;
+    }
+
+    // Probe a legacy DS card title: rom header, banner icon, SPI card type. `id`
+    // is overwritten with a synthesized stable key (see dsCardId) before use.
+    bool probeCard(u64& id, FS_MediaType media, u8* productCode, bool& accessibleSave, bool& gba, bool& accessibleExtdata,
         std::u16string& shortDescription, std::u16string& longDescription, std::u16string& savePath, std::u16string& extdataPath, CardType& spiCard,
         IconStore& icons)
     {
@@ -124,6 +141,10 @@ namespace {
         std::copy(headerData + 12, headerData + 16, gameCode);
         cardTitle[13] = '\0';
         gameCode[5]   = '\0';
+
+        // Replace the placeholder id (0) with a stable per-cart key derived from
+        // the game code, so config keyed on the title id works for DS carts too.
+        id = dsCardId(gameCode);
 
         delete[] headerData;
         headerData = new u8[0x23C0];
