@@ -73,10 +73,28 @@ namespace {
     const std::array<const char*, 6> kCategoryKeys = {"settings.cat.general", "settings.cat.library", "settings.cat.save_folders",
         "settings.cat.connectivity", "settings.cat.logs", "settings.cat.about"};
 
+    // Supported language codes, in cycle order. Adding a language only means
+    // appending here (plus its romfs i18n.json entries and isSupported()).
+    const std::string LANGUAGES[]   = {"en", "it", "es"};
+    constexpr size_t LANGUAGE_COUNT = sizeof(LANGUAGES) / sizeof(LANGUAGES[0]);
+
     // Display name for a language code, in its own language (never localized).
     const char* languageName(const std::string& code)
     {
-        return code == "it" ? "Italiano" : "English";
+        if (code == "it")
+            return "Italiano";
+        if (code == "es")
+            return "Español";
+        return "English";
+    }
+
+    size_t languageIndex(const std::string& code)
+    {
+        for (size_t i = 0; i < LANGUAGE_COUNT; i++) {
+            if (LANGUAGES[i] == code)
+                return i;
+        }
+        return 0;
     }
 
     // Log viewer: monospace body text, tight line spacing so a useful number of
@@ -179,20 +197,26 @@ void SettingsScreen::rebuildRows(void)
             };
             mRows.push_back(std::move(theme));
 
-            // Language, in the Appearance section next to Theme. Segmented, flips
-            // on A only (like Theme). The option names stay in their own language.
-            // A change defers a rebuild so every row picks up the new language.
+            // Language, in the Appearance section next to Theme. Spinner, cycles
+            // left/right like Default sort (more than two options reads better
+            // as a cycler than as a segmented control). The option names stay
+            // in their own language. A change defers a rebuild so every row
+            // picks up the new language.
             Row language;
-            language.title      = i18n::t("settings.general.language");
-            language.subtitle   = i18n::t("settings.general.language.sub");
-            language.control    = Control::Segmented;
-            language.section    = i18n::t("settings.section.appearance");
-            language.options    = {languageName("en"), languageName("it")};
-            language.getIndex   = []() { return i18n::language() == "it" ? 1 : 0; };
-            language.onActivate = [this, &cfg]() {
-                const std::string next = i18n::language() == "en" ? "it" : "en";
-                cfg.setLanguage(next);
-                i18n::setLanguage(next);
+            language.title    = i18n::t("settings.general.language");
+            language.subtitle = i18n::t("settings.general.language.sub");
+            language.control  = Control::Spinner;
+            language.section  = i18n::t("settings.section.appearance");
+            for (const std::string& code : LANGUAGES) {
+                language.options.push_back(languageName(code));
+            }
+            language.getIndex = []() { return (int)languageIndex(i18n::language()); };
+            language.onCycle  = [this, &cfg](int delta) {
+                int count               = (int)LANGUAGE_COUNT;
+                int next                = ((int)languageIndex(i18n::language()) + delta % count + count) % count;
+                const std::string& code = LANGUAGES[next];
+                cfg.setLanguage(code);
+                i18n::setLanguage(code);
                 flashSaved();
                 mNeedsRebuild = true;
             };

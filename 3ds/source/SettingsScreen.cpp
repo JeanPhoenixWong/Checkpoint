@@ -80,15 +80,34 @@ namespace {
         {"settings.general.quick_backup", "settings.general.quick_backup.sub"},
     };
     constexpr size_t GENERAL_COUNT = sizeof(GENERAL_ROWS) / sizeof(GENERAL_ROWS[0]);
-    // Extra General row after the toggles: a language cycler (en <-> it). Kept
-    // out of the toggle arrays since it has a value, not an on/off state.
+    // Extra General row after the toggles: a language cycler (en -> it -> es
+    // -> en). Kept out of the toggle arrays since it has a value, not an
+    // on/off state.
     constexpr size_t GENERAL_ROW_TOTAL = GENERAL_COUNT + 1;
     constexpr int LANGUAGE_ROW         = (int)GENERAL_COUNT;
+
+    // Supported language codes, in cycle order. Adding a language only means
+    // appending here (plus its romfs i18n.json entries and isSupported()).
+    const std::string LANGUAGES[]   = {"en", "it", "es"};
+    constexpr size_t LANGUAGE_COUNT = sizeof(LANGUAGES) / sizeof(LANGUAGES[0]);
 
     // Display name for a language code, in its own language (never localized).
     const char* languageName(const std::string& code)
     {
-        return code == "it" ? "Italiano" : "English";
+        if (code == "it")
+            return "Italiano";
+        if (code == "es")
+            return "Español";
+        return "English";
+    }
+
+    size_t languageIndex(const std::string& code)
+    {
+        for (size_t i = 0; i < LANGUAGE_COUNT; i++) {
+            if (LANGUAGES[i] == code)
+                return i;
+        }
+        return 0;
     }
 
     constexpr int SAVED_FLASH_FRAMES = 90;
@@ -511,9 +530,9 @@ void SettingsScreen::toggleGeneral(int idx)
 {
     Configuration& cfg = Configuration::getInstance();
     if (idx == LANGUAGE_ROW) {
-        // Cycle en -> it -> en. Persist to config and switch live; every t()
-        // call from the next frame resolves against the new language.
-        const std::string next = i18n::language() == "en" ? "it" : "en";
+        // Cycle en -> it -> es -> en. Persist to config and switch live; every
+        // t() call from the next frame resolves against the new language.
+        const std::string next = LANGUAGES[(languageIndex(i18n::language()) + 1) % LANGUAGE_COUNT];
         cfg.setLanguage(next);
         i18n::setLanguage(next);
         // The content-keyed TextPool cache needs no flush: new-language strings
