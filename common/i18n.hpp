@@ -24,33 +24,32 @@
  *         reasonable ways as different from the original version.
  */
 
-#include "ErrorOverlay.hpp"
-#include "gfxutils.hpp"
-#include "i18n.hpp"
+#ifndef I18N_HPP
+#define I18N_HPP
 
-ErrorOverlay::ErrorOverlay(Screen& screen, Result mres, const std::string& mtext) : Overlay(screen)
-{
-    res  = mres;
-    text = mtext;
-    Gfx::GetTextDimensions(28, text.c_str(), &textw, &texth);
-    button = std::make_unique<Clickable>(322, 462, 636, 56, COLOR_BG, COLOR_WHITE, "OK", true);
-    button->selected(true);
+#include <initializer_list>
+#include <string>
+
+// Runtime string localization. One flat JSON per project (romfs:/i18n.json)
+// maps key -> { lang -> text }. Lookups happen live at every call so any
+// string fetched per frame updates instantly on setLanguage. See HANDOFF-i18n.md.
+namespace i18n {
+    // Parse the romfs json once at boot. Safe to call before setLanguage. A
+    // parse failure leaves the table empty and every t() falls back to the key.
+    bool init(const std::string& path);
+
+    // Only "en", "it" and "es" are accepted; anything else falls back to "en".
+    void setLanguage(const std::string& code);
+    const std::string& language(void);
+
+    // Lookup with fallback chain: current lang -> "en" -> the key itself.
+    // A visible "settings.general.title" on screen flags a missing entry.
+    std::string t(const std::string& key);
+
+    // Placeholder substitution: replaces "{0}", "{1}", ... with args. Args are
+    // pre-stringified by the caller (this does no printf). Indexed placeholders
+    // let a translation reorder arguments relative to English.
+    std::string t(const std::string& key, std::initializer_list<std::string> args);
 }
 
-void ErrorOverlay::draw(void) const
-{
-    Gfx::DrawRect(0, 0, 1280, 720, COLOR_SCRIM);
-    Gfx::DrawRect(320, 200, 640, 260, COLOR_BLACK);
-    Gfx::DrawText(20, 330, 210, COLOR_DANGER, StringUtils::format("%s: 0x%0llX", i18n::t("common.error").c_str(), res).c_str());
-    Gfx::DrawText(28, ceilf(1280 - textw) / 2, 200 + ceilf((260 - texth) / 2), COLOR_WHITE, text.c_str());
-    button->draw(28, COLOR_DANGER);
-    drawPulsingOutline(322, 462, 636, 56, 4, COLOR_DANGER);
-}
-
-void ErrorOverlay::update(const InputState& input)
-{
-    const u64 kDown = input.kDown;
-    if (button->released() || (kDown & HidNpadButton_A) || (kDown & HidNpadButton_B)) {
-        screen.removeOverlay();
-    }
-}
+#endif

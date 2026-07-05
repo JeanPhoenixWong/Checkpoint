@@ -95,6 +95,10 @@ Configuration::Configuration(void)
             mJson["theme"] = "dark";
             updateJson     = true;
         }
+        if (!(mJson.contains("language") && mJson["language"].is_string())) {
+            mJson["language"] = "en";
+            updateJson        = true;
+        }
         if (!(mJson.contains("sort-mode") && mJson["sort-mode"].is_string())) {
             mJson["sort-mode"] = SortMode::of(SORT_ALPHA).configKey;
             updateJson         = true;
@@ -252,6 +256,7 @@ void Configuration::parse(void)
     mQuickBackup = mJson.value("quick-backup", false);
 
     mTheme    = mJson.value("theme", "dark");
+    mLanguage = mJson.value("language", "en");
     mSortMode = SortMode::fromConfigKey(mJson.value("sort-mode", std::string(SortMode::of(SORT_ALPHA).configKey)));
 }
 
@@ -409,6 +414,18 @@ void Configuration::setTheme(const std::string& theme)
 {
     mTheme         = theme;
     mJson["theme"] = theme;
+    save();
+}
+
+std::string Configuration::language(void)
+{
+    return mLanguage;
+}
+
+void Configuration::setLanguage(const std::string& language)
+{
+    mLanguage         = language;
+    mJson["language"] = language;
     save();
 }
 

@@ -57,6 +57,8 @@ public:
     bool quickBackup(void);
     // "dark" (default) or "light". Selects the color palette; see Colors::apply.
     std::string theme(void);
+    // "en" (default) or "it". Selects the UI language; see i18n::setLanguage.
+    std::string language(void);
     std::vector<std::u16string> additionalSaveFolders(u64 id);
     std::vector<std::u16string> additionalExtdataFolders(u64 id);
 
@@ -77,6 +79,9 @@ public:
     void setFTPEnabled(bool v);
     void setQuickBackup(bool v);
     void setTheme(const std::string& v);
+    // Persists immediately (calls save()): language changes are rare and must
+    // survive even if no commit() follows before shutdown.
+    void setLanguage(const std::string& v);
 
     // Flushes pending changes to config.json (no-op when nothing is dirty).
     void commit(void);
@@ -110,12 +115,13 @@ private:
     std::unordered_set<u64> mFilterIds, mFavoriteIds;
     std::unordered_map<u64, std::vector<std::u16string>> mAdditionalSaveFolders, mAdditionalExtdataFolders;
     bool mNandSaves = false, mDSiWareSaves = false, mScanCard = false, mTransferEnabled = false, mConfirmRestore = true;
-    bool mFTPEnabled     = false;
-    bool mQuickBackup    = false;
-    std::string mTheme   = "dark";
-    std::string BASEPATH = "/3ds/Checkpoint/config.json";
-    size_t oldSize       = 0;
-    bool mDirty          = false; // General toggles pending a deferred save()
+    bool mFTPEnabled      = false;
+    bool mQuickBackup     = false;
+    std::string mTheme    = "dark";
+    std::string mLanguage = "en";
+    std::string BASEPATH  = "/3ds/Checkpoint/config.json";
+    size_t oldSize        = 0;
+    bool mDirty           = false; // General toggles pending a deferred save()
 };
 
 #endif

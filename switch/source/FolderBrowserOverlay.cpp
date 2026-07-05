@@ -29,6 +29,7 @@
 #include "common.hpp"
 #include "directory.hpp"
 #include "gfxutils.hpp"
+#include "i18n.hpp"
 #include "shapes.hpp"
 #include "uikit.hpp"
 #include <algorithm>
@@ -93,8 +94,8 @@ void FolderBrowserOverlay::draw(void) const
     Gfx::DrawRect(LIST_X, PANEL_Y + 70, LIST_W, 1, COLOR_STROKE1);
 
     if (mFolders.empty()) {
-        Gfx::DrawText(15, LIST_X, LIST_Y + 8, COLOR_TEXT2, "No sub-folders here.");
-        Gfx::DrawText(13, LIST_X, LIST_Y + 34, COLOR_TEXT3, "Press X to use this folder.");
+        Gfx::DrawText(15, LIST_X, LIST_Y + 8, COLOR_TEXT2, i18n::t("overlay.no_subfolders").c_str());
+        Gfx::DrawText(13, LIST_X, LIST_Y + 34, COLOR_TEXT3, i18n::t("overlay.use_folder_hint").c_str());
     }
 
     for (int i = mScroll; i < (int)mFolders.size() && i < mScroll + VISIBLE; i++) {
@@ -111,9 +112,9 @@ void FolderBrowserOverlay::draw(void) const
     }
 
     UiKit::drawHintBar({
-        {"A", "Open"},
-        {"X", "Use folder"},
-        {"B", mCurrent == "/" ? "Cancel" : "Up"},
+        {"A", i18n::t("overlay.open")},
+        {"X", i18n::t("overlay.use_folder")},
+        {"B", mCurrent == "/" ? i18n::t("common.cancel") : i18n::t("overlay.up")},
     });
 }
 

@@ -25,18 +25,19 @@
  */
 
 #include "outcomemessages.hpp"
+#include "i18n.hpp"
 
 std::string OutcomeMessages::backupError(io::BackupStage stage, const std::string& dataType)
 {
     switch (stage) {
         case io::BackupStage::OpenArchive:
-            return "Failed to open save archive.";
+            return i18n::t("outcome.open_archive");
         case io::BackupStage::DeleteDst:
-            return "Failed to delete the existing backup\ndirectory recursively.";
+            return i18n::t("outcome.delete_dst");
         case io::BackupStage::CreateDst:
-            return "Failed to create destination directory.";
+            return i18n::t("outcome.create_dst");
         default:
-            return "Failed to backup " + dataType + ".";
+            return i18n::t("outcome.backup_failed", {dataType});
     }
 }
 
@@ -44,15 +45,15 @@ std::string OutcomeMessages::restoreError(io::BackupStage stage, const std::stri
 {
     switch (stage) {
         case io::BackupStage::OpenArchive:
-            return "Failed to open save archive.";
+            return i18n::t("outcome.open_archive");
         case io::BackupStage::ReadFile:
-            return "Failed to read save file backup.";
+            return i18n::t("outcome.read_file");
         case io::BackupStage::Commit:
-            return "Failed to commit save data.";
+            return i18n::t("outcome.commit");
         case io::BackupStage::SecureValue:
-            return "Failed to fix secure value.";
+            return i18n::t("outcome.secure_value");
         default:
-            return "Failed to restore " + dataType + ".";
+            return i18n::t("outcome.restore_failed", {dataType});
     }
 }
 
@@ -60,16 +61,16 @@ std::string OutcomeMessages::sendError(const Transfer::SendOutcome& outcome)
 {
     switch (outcome.stage) {
         case Transfer::SendStage::Zip:
-            return "Failed to create backup package.";
+            return i18n::t("outcome.send_zip");
         case Transfer::SendStage::Socket:
-            return "Failed to open socket.";
+            return i18n::t("outcome.send_socket");
         case Transfer::SendStage::Resolve:
-            return "Invalid IP address.";
+            return i18n::t("outcome.send_resolve");
         case Transfer::SendStage::Connect:
-            return "Failed to connect.";
+            return i18n::t("outcome.send_connect");
         case Transfer::SendStage::Response:
-            return outcome.detail.empty() ? "Receiver returned no response." : "Receiver error: " + outcome.detail;
+            return outcome.detail.empty() ? i18n::t("outcome.send_no_response") : i18n::t("outcome.send_receiver_error", {outcome.detail});
         default:
-            return "Transfer failed.";
+            return i18n::t("outcome.send_failed");
     }
 }

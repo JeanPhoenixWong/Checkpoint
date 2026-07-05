@@ -26,6 +26,7 @@
 
 #include "MessageOverlay.hpp"
 #include "ModalChrome.hpp"
+#include "i18n.hpp"
 #include "textpool.hpp"
 
 MessageOverlay::MessageOverlay(Screen& screen, const std::string& mtext, const Style& style) : Overlay(screen), mStyle(style)
@@ -72,7 +73,8 @@ InfoOverlay::InfoOverlay(Screen& screen, const std::string& mtext)
 }
 
 ErrorOverlay::ErrorOverlay(Screen& screen, Result res, const std::string& mtext)
-    : MessageOverlay(
-          screen, mtext, Style{COLOR_DANGER, COLOR_DANGER, COLOR_WHITE, COLOR_DANGER, StringUtils::format("Error: 0x%08lX", res), COLOR_DANGER})
+    : MessageOverlay(screen, mtext,
+          Style{COLOR_DANGER, COLOR_DANGER, COLOR_WHITE, COLOR_DANGER, StringUtils::format("%s: 0x%08lX", i18n::t("common.error").c_str(), res),
+              COLOR_DANGER})
 {
 }

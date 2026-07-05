@@ -19,5 +19,6 @@
   "ftp-enabled": false,
   "quick_backup": false,
   "theme": "dark",
+  "language": "en",
   "version": 5
 }

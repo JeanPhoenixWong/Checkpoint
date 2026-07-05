@@ -28,6 +28,7 @@
 #include "backupsize.hpp"
 #include "colors.hpp"
 #include "configuration.hpp"
+#include "i18n.hpp"
 #include "io.hpp"
 #include "main.hpp"
 #include "savedatasource.hpp"
@@ -214,8 +215,9 @@ void BackupList::draw(bool focused)
         if (i == 0) {
             // The synthetic "New..." entry, rendered as the create-backup row.
             u32 th;
-            Gfx::GetTextDimensions(14, "New backup", NULL, &th);
-            Gfx::DrawText(14, mListX + 16, ry + (ROW_H - (int)th) / 2, COLOR_ACCENT_LIGHT, " New backup");
+            std::string newLbl = i18n::t("main.new_backup");
+            Gfx::GetTextDimensions(14, newLbl.c_str(), NULL, &th);
+            Gfx::DrawText(14, mListX + 16, ry + (ROW_H - (int)th) / 2, COLOR_ACCENT_LIGHT, (" " + newLbl).c_str());
             // The breathing ring must reach the "New backup" row too.
             if (cur) {
                 Shapes::focusRing(mListX, ry, mListW, ROW_H, 0, COLOR_ACCENT);

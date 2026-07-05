@@ -91,6 +91,10 @@ Configuration::Configuration(void)
                     (*mJson)["theme"] = "dark";
                     updateJson        = true;
                 }
+                if (!(mJson->contains("language") && (*mJson)["language"].is_string())) {
+                    (*mJson)["language"] = "en";
+                    updateJson           = true;
+                }
                 if (!(mJson->contains("filter") && (*mJson)["filter"].is_array())) {
                     (*mJson)["filter"] = nlohmann::json::array();
                     updateJson         = true;
@@ -163,6 +167,7 @@ Configuration::Configuration(void)
             mFTPEnabled      = (*mJson)["ftp-enabled"];
             mQuickBackup     = (*mJson)["quick_backup"];
             mTheme           = (*mJson)["theme"];
+            mLanguage        = (*mJson)["language"];
 
             // parse additional save folders
             auto js = (*mJson)["additional_save_folders"];
@@ -292,6 +297,11 @@ std::string Configuration::theme(void)
     return mTheme;
 }
 
+std::string Configuration::language(void)
+{
+    return mLanguage;
+}
+
 void Configuration::setNandSaves(bool v)
 {
     mNandSaves             = v;
@@ -346,6 +356,14 @@ void Configuration::setTheme(const std::string& v)
     mTheme            = v;
     (*mJson)["theme"] = v;
     mDirty            = true;
+}
+
+void Configuration::setLanguage(const std::string& v)
+{
+    mLanguage            = v;
+    (*mJson)["language"] = v;
+    mDirty               = true;
+    save();
 }
 
 // Rebuilds a json string-array of hex title ids from the given set.

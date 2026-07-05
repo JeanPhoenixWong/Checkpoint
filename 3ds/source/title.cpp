@@ -25,6 +25,7 @@
  */
 
 #include "title.hpp"
+#include "i18n.hpp"
 #include "loader.hpp"
 #include "main.hpp"
 #include "titlequirks.hpp"
@@ -91,9 +92,9 @@ std::string Title::mediaTypeString(void)
 {
     switch (mMedia) {
         case MEDIATYPE_SD:
-            return "SD Card";
+            return i18n::t("media.sd_card");
         case MEDIATYPE_GAME_CARD:
-            return "Cartridge";
+            return i18n::t("media.cartridge");
         case MEDIATYPE_NAND:
             return "NAND";
         default:

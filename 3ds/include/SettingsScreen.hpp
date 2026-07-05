@@ -86,9 +86,12 @@ private:
     void drawNetwork(void) const;
     void drawAbout(void) const;
 
-    void drawToggleRow(int y, const char* name, const char* sub, bool on, bool focused) const;
+    void drawToggleRow(int y, const std::string& name, const std::string& sub, bool on, bool focused) const;
+    // Like drawToggleRow but shows a right-aligned value string instead of an
+    // on/off pip (used by the General language cycler).
+    void drawValueRow(int y, const std::string& name, const std::string& sub, const std::string& value, bool focused) const;
     void drawListRow(int y, const std::string& primary, const std::string& secondary, u32 pipColor, bool focused, bool removable) const;
-    void drawEmptyState(const char* title, const char* body) const;
+    void drawEmptyState(const std::string& title, const std::string& body) const;
     void drawHints(int screenW, int y, const std::string& text) const;
     // Right-edge position indicator for scrollable content lists, mirroring the
     // main page's backup list. No-op when everything fits in one viewport.
