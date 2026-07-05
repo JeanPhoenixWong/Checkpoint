@@ -29,10 +29,10 @@
 const std::array<SortMode, SORT_MODES_COUNT>& SortMode::all()
 {
     static const std::array<SortMode, SORT_MODES_COUNT> modes = {{
-        {SORT_ALPHA, "A-Z", "alpha"},
-        {SORT_LAST_PLAYED, "Last played", "last-played"},
-        {SORT_MOST_BACKUPS, "Most backups", "most-backups"},
-        {SORT_FAVORITES_FIRST, "Favorites first", "favorites-first"},
+        {SORT_ALPHA, "sort.alpha", "alpha"},
+        {SORT_LAST_PLAYED, "sort.last_played", "last-played"},
+        {SORT_MOST_BACKUPS, "sort.most_backups", "most-backups"},
+        {SORT_FAVORITES_FIRST, "sort.favorites_first", "favorites-first"},
     }};
     return modes;
 }

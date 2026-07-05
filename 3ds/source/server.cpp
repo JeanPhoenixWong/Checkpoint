@@ -25,6 +25,7 @@
  */
 
 #include "server.hpp"
+#include "i18n.hpp"
 #include "logging.hpp"
 #include "main.hpp"
 #include "thread.hpp"
@@ -148,7 +149,7 @@ namespace {
                     }
                     if (path == "/transfer/upload") {
                         trackTransfer = true;
-                        TransferStatus::beginNetwork("Downloading backup", contentLength);
+                        TransferStatus::beginNetwork(i18n::t("transfer.downloading"), contentLength);
                     }
                     if (contentLength == 0) {
                         break;

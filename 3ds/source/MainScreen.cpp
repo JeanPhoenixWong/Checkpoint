@@ -30,6 +30,7 @@
 #include "backupsize.hpp"
 #include "backuptarget.hpp"
 #include "configuration.hpp"
+#include "i18n.hpp"
 #include "io.hpp"
 #include "loader.hpp"
 #include "outcomemessages.hpp"
@@ -90,8 +91,8 @@ namespace {
         g.segH      = 16;
         g.segY      = 4;
         g.pad       = 7;
-        g.cellSaveW = (int)ceilf(text.width("Save", 0.4f)) + g.pad * 2;
-        g.cellExtW  = (int)ceilf(text.width("Extdata", 0.4f)) + g.pad * 2;
+        g.cellSaveW = (int)ceilf(text.width(i18n::t("main.tab_save"), 0.4f)) + g.pad * 2;
+        g.cellExtW  = (int)ceilf(text.width(i18n::t("main.tab_extdata"), 0.4f)) + g.pad * 2;
         g.segX      = 320 - 6 - g.cellSaveW - g.cellExtW;
         return g;
     }
@@ -104,15 +105,15 @@ MainScreen::MainScreen(void) : hid(rowlen * collen, collen)
     transferEnabled = Configuration::getInstance().transferEnabled();
 
     // Detail action buttons. Backup is the primary (accent), Restore secondary.
-    buttonBackup  = std::make_unique<Clickable>(8, 182, 148, 30, COLOR_ACCENT, COLOR_WHITE, "Backup ", true);
-    buttonRestore = std::make_unique<Clickable>(164, 182, 148, 30, COLOR_RAISED, COLOR_TEXT, "Restore ", true);
+    buttonBackup  = std::make_unique<Clickable>(8, 182, 148, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup") + " ", true);
+    buttonRestore = std::make_unique<Clickable>(164, 182, 148, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.restore") + " ", true);
     // Narrower Backup/Restore + Coins trio shown side by side on the Activity Log title.
-    buttonBackupAL  = std::make_unique<Clickable>(8, 182, 96, 30, COLOR_ACCENT, COLOR_WHITE, "Backup", true);
-    buttonPlayCoins = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, "Coins", true);
-    buttonRestoreAL = std::make_unique<Clickable>(216, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, "Restore", true);
+    buttonBackupAL  = std::make_unique<Clickable>(8, 182, 96, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup_short"), true);
+    buttonPlayCoins = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.coins"), true);
+    buttonRestoreAL = std::make_unique<Clickable>(216, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.restore_short"), true);
     // Full-width batch-backup button shown only while multi-selecting.
-    buttonBackupAll = std::make_unique<Clickable>(8, 182, 304, 30, COLOR_ACCENT, COLOR_WHITE, "Backup selected", true);
-    buttonTransfer  = std::make_unique<Clickable>(4, 223, 96, 16, COLOR_RAISED, COLOR_MUTED, "Transfer", true);
+    buttonBackupAll = std::make_unique<Clickable>(8, 182, 304, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup_selected"), true);
+    buttonTransfer  = std::make_unique<Clickable>(4, 223, 96, 16, COLOR_RAISED, COLOR_MUTED, i18n::t("main.transfer"), true);
     directoryList   = std::make_unique<BackupList>(12, 70, 296, 106, 5);
     buttonBackup->canChangeColorWhenSelected(true);
     buttonBackupAll->canChangeColorWhenSelected(true);
@@ -196,14 +197,14 @@ void MainScreen::drawTop(void) const
         text.draw(timeStr, 400 - 6 - w, 6, 0.42f, COLOR_FAINT);
 
         if (multi) {
-            std::string badge = StringUtils::format("%zu selected", selEnt.size());
+            std::string badge = i18n::t("main.selected_badge", {std::to_string(selEnt.size())});
             float bw          = text.width(badge, 0.42f);
             float bx          = 400 - 6 - w - 8 - bw - 12;
             C2D_DrawRectSolid(bx - 6, 4, 0.5f, bw + 12, 16, COLOR_ACCENT);
             text.draw(badge, bx, 6, 0.42f, COLOR_WHITE);
         }
         else {
-            std::string cnt = StringUtils::format("%zu titles", count);
+            std::string cnt = i18n::t("main.titles_count", {std::to_string(count)});
             float cw        = text.width(cnt, 0.42f);
             text.draw(cnt, 400 - 6 - w - 10 - cw, 6, 0.42f, COLOR_MUTED);
         }
@@ -215,7 +216,7 @@ void MainScreen::drawTop(void) const
         if (percentage >= 100) {
             percentage = 99;
         }
-        std::string msg = StringUtils::format("Loading titles... %d%%", percentage);
+        std::string msg = i18n::t("main.loading", {std::to_string(percentage)});
         text.drawCentered(msg, 0, 400, ceilf((240 - 0.6f * fontGetInfo(NULL)->lineFeed) / 2), 0.6f, COLOR_TEXT, 0.9f);
         return;
     }
@@ -273,8 +274,8 @@ void MainScreen::drawTop(void) const
         C2D_DrawRectSolid(0, 0, 0.5f, 400, 240, COLOR_OVERLAY);
         u64 total = ts.bytesTotal, done = ts.bytesDone;
         int pct            = total > 0 ? (int)((done * 100) / total) : 0;
-        std::string prefix = ts.mode.empty() ? "Transferring backup" : ts.mode;
-        std::string line1  = StringUtils::format("%s... %d%%", prefix.c_str(), pct);
+        std::string prefix = ts.mode.empty() ? i18n::t("main.transferring") : ts.mode;
+        std::string line1  = i18n::t("main.progress_pct", {prefix, std::to_string(pct)});
         std::string line2  = TransferStatus::bytesToMB(done, total);
         const float lh     = 0.7f * fontGetInfo(NULL)->lineFeed;
         float startY       = ceilf((240 - 2 * lh) / 2);
@@ -301,8 +302,8 @@ void MainScreen::drawBottom(void) const
             const bool onSave = backupKind == BackupKind::Save;
             C2D_DrawRectSolid(
                 onSave ? seg.segX : seg.segX + seg.cellSaveW, seg.segY, 0.5f, onSave ? seg.cellSaveW : seg.cellExtW, seg.segH, COLOR_ACCENT);
-            text.draw("Save", seg.segX + seg.pad, seg.segY + 2, 0.4f, onSave ? COLOR_WHITE : COLOR_MUTED);
-            text.draw("Extdata", seg.segX + seg.cellSaveW + seg.pad, seg.segY + 2, 0.4f, onSave ? COLOR_MUTED : COLOR_WHITE);
+            text.draw(i18n::t("main.tab_save"), seg.segX + seg.pad, seg.segY + 2, 0.4f, onSave ? COLOR_WHITE : COLOR_MUTED);
+            text.draw(i18n::t("main.tab_extdata"), seg.segX + seg.cellSaveW + seg.pad, seg.segY + 2, 0.4f, onSave ? COLOR_MUTED : COLOR_WHITE);
         }
 
         std::string name = text.truncate(selected.name, seg.segX - 8 - 8, 0.5f);
@@ -316,7 +317,7 @@ void MainScreen::drawBottom(void) const
             x += text.draw(selected.cartId, x, y, 0.42f, COLOR_MUTED) + sep;
             x += text.draw("·  " + selected.mediaType, x, y, 0.42f, COLOR_MUTED) + sep;
             if (selected.favorite) {
-                text.draw("·  ★ Favorite", x, y, 0.42f, COLOR_GOLD);
+                text.draw("·  ★ " + i18n::t("main.favorite"), x, y, 0.42f, COLOR_GOLD);
             }
         }
 
@@ -324,13 +325,13 @@ void MainScreen::drawBottom(void) const
         // their async sizes) were rebuilt by refreshSelected() when they changed.
         C2D_DrawRectSolid(8, 46, 0.5f, 304, 132, COLOR_CARD);
         C2D_DrawRectSolid(8, 67, 0.5f, 304, 1, COLOR_LINE);
-        text.draw("Backups", 16, 49, 0.45f, COLOR_MUTED);
+        text.draw(i18n::t("main.backups"), 16, 49, 0.45f, COLOR_MUTED);
         {
             // Total: shown once the worker has resolved it; until then a "…" placeholder.
-            std::string meta = selected.backupCount == 0 ? std::string("No backups")
-                               : selected.totalSize      ? StringUtils::format("%zu saved  ·  %s", selected.backupCount,
-                                                               StringUtils::humanBytes(*selected.totalSize).c_str())
-                                                         : StringUtils::format("%zu saved  ·  …", selected.backupCount);
+            std::string meta = selected.backupCount == 0 ? i18n::t("main.no_backups")
+                               : selected.totalSize      ? i18n::t("main.backups_meta",
+                                                               {std::to_string(selected.backupCount), StringUtils::humanBytes(*selected.totalSize)})
+                                                         : i18n::t("main.backups_meta_pending", {std::to_string(selected.backupCount)});
             float w          = text.width(meta, 0.42f);
             text.draw(meta, 312 - 8 - w, 50, 0.42f, COLOR_FAINT);
         }
@@ -339,15 +340,20 @@ void MainScreen::drawBottom(void) const
         // Actions. While multi-selecting, one full-width Backup button replaces the
         // per-title Backup/Restore pair and drives the whole tagged batch.
         if (MS::multipleSelectionEnabled()) {
-            buttonBackupAll->text(StringUtils::format("Backup %zu selected ", MS::selectedEntries().size()));
+            buttonBackupAll->text(i18n::t("main.backup_n_selected", {std::to_string(MS::selectedEntries().size())}) + " ");
             buttonBackupAll->draw(0.6f, COLOR_RING);
         }
         else if (selected.activityLog) {
+            buttonBackupAL->text(i18n::t("main.backup_short"));
+            buttonPlayCoins->text(i18n::t("main.coins"));
+            buttonRestoreAL->text(i18n::t("main.restore_short"));
             buttonBackupAL->draw(0.6f, COLOR_RING);
             buttonPlayCoins->draw(0.6f, COLOR_ACCENT);
             buttonRestoreAL->draw(0.6f, COLOR_RING);
         }
         else {
+            buttonBackup->text(i18n::t("main.backup") + " ");
+            buttonRestore->text(i18n::t("main.restore") + " ");
             buttonBackup->draw(0.6f, COLOR_RING);
             buttonRestore->draw(0.6f, COLOR_RING);
         }
@@ -367,9 +373,9 @@ void MainScreen::drawBottom(void) const
     C2D_DrawRectSolid(0, 220, 0.5f, 320, FOOTER_H, COLOR_SURFACE);
     C2D_DrawRectSolid(0, 219, 0.5f, 320, 1, COLOR_LINE);
     drawHints(320, 223,
-        MS::multipleSelectionEnabled() ? "Backup selected      Clear selection"
-        : g_bottomScrollEnabled        ? " Confirm      Delete      Back"
-                                       : " Go to saves");
+        MS::multipleSelectionEnabled() ? i18n::t("main.backup_selected") + "      " + i18n::t("main.clear_selection")
+        : g_bottomScrollEnabled        ? " " + i18n::t("hint.confirm") + "      " + i18n::t("hint.delete") + "      " + i18n::t("hint.back")
+                                       : " " + i18n::t("main.hint.go_saves"));
 
     // Live local-copy progress modal (network sends draw on the top screen).
     const TransferSnapshot& ts = mTransfer;
@@ -383,7 +389,7 @@ void MainScreen::drawBottom(void) const
         C2D_DrawRectSolid(mx, my, 0.5f, mw, mh, COLOR_CARD);
         Gui::drawOutline(mx, my, mw, mh, 2, COLOR_ACCENT);
 
-        std::string titleStr = (ts.mode.empty() ? "Copying files" : ts.mode) + " in progress...";
+        std::string titleStr = i18n::t("main.in_progress", {ts.mode.empty() ? i18n::t("main.copying") : ts.mode});
         text.drawCentered(titleStr, mx, mw, my + 10, 0.55f, COLOR_TEXT);
 
         std::string fname = StringUtils::UTF16toUTF8(ts.currentFile);
@@ -405,20 +411,18 @@ void MainScreen::drawBottom(void) const
 
         int barY = my + 52;
         if (multiSelect) {
-            float overallProgress = (float)ts.saveCount / (float)ts.saveTotal;
-            char overallCountStr[24];
-            snprintf(overallCountStr, sizeof(overallCountStr), "Save %zu / %zu", ts.saveCount + 1, ts.saveTotal);
+            float overallProgress       = (float)ts.saveCount / (float)ts.saveTotal;
+            std::string overallCountStr = i18n::t("main.save_n", {std::to_string(ts.saveCount + 1), std::to_string(ts.saveTotal)});
             char overallPctStr[8];
             snprintf(overallPctStr, sizeof(overallPctStr), "%d%%", (int)(overallProgress * 100));
-            drawProgressBar(barY, overallProgress, overallCountStr, overallPctStr);
+            drawProgressBar(barY, overallProgress, overallCountStr.c_str(), overallPctStr);
             barY += 30;
         }
-        float progress = (ts.copyTotal > 0) ? (float)ts.copyCount / (float)ts.copyTotal : 0.0f;
-        char countStr[24];
-        snprintf(countStr, sizeof(countStr), "File %zu / %zu", ts.copyCount, ts.copyTotal);
+        float progress       = (ts.copyTotal > 0) ? (float)ts.copyCount / (float)ts.copyTotal : 0.0f;
+        std::string countStr = i18n::t("main.file_n", {std::to_string(ts.copyCount), std::to_string(ts.copyTotal)});
         char pctStr[8];
         snprintf(pctStr, sizeof(pctStr), "%d%%", (int)((progress > 1.0f ? 1.0f : progress) * 100));
-        drawProgressBar(barY, progress, countStr, pctStr);
+        drawProgressBar(barY, progress, countStr.c_str(), pctStr);
         barY += 30;
         float fileProgress = (ts.currentFileSize > 0) ? (float)ts.currentFileOffset / (float)ts.currentFileSize : 0.0f;
         char kbStr[32];
@@ -448,7 +452,7 @@ void MainScreen::update(const InputState& input)
         }
         else if (result->send) {
             if (result->send->stage == Transfer::SendStage::EmptyBackup) {
-                currentOverlay = std::make_shared<InfoOverlay>(*this, "Selected backup is empty.");
+                currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.backup_empty"));
             }
             else {
                 currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, OutcomeMessages::sendError(*result->send));
@@ -533,7 +537,7 @@ void MainScreen::refreshSelected(void)
     selected.id          = title.id();
     selected.rootPath    = target.rootPath();
     selected.name        = title.shortDescription();
-    selected.cartId      = title.productCode[0] != '\0' ? std::string(title.productCode) : std::string("System title");
+    selected.cartId      = title.productCode[0] != '\0' ? std::string(title.productCode) : i18n::t("main.system_title");
     selected.mediaType   = title.mediaTypeString();
     selected.favorite    = catalog.favorite(selected.fullIndex, backupKind);
     selected.activityLog = title.isActivityLog();
@@ -545,7 +549,8 @@ void MainScreen::refreshSelected(void)
     directoryList->clear();
     for (size_t i = 0; i < dirs.size(); i++) {
         if (i == 0) {
-            directoryList->push_back("New backup", backupKind == BackupKind::Save ? "From current save" : "From current extdata", true);
+            directoryList->push_back(i18n::t("main.new_backup"),
+                backupKind == BackupKind::Save ? i18n::t("main.from_current_save") : i18n::t("main.from_current_extdata"), true);
         }
         else {
             std::optional<u64> bs = BackupSizeCache::get().backupSize(target.fullPath(i));
@@ -619,7 +624,7 @@ void MainScreen::requestRestore(size_t cellIndex)
         TransferJob::get().start();
     };
     if (Configuration::getInstance().confirmRestore()) {
-        currentOverlay = std::make_shared<YesNoOverlay>(*this, "Restore selected save?", run, [this]() { this->removeOverlay(); });
+        currentOverlay = std::make_shared<YesNoOverlay>(*this, i18n::t("main.confirm_restore"), run, [this]() { this->removeOverlay(); });
     }
     else {
         run();
@@ -659,7 +664,7 @@ void MainScreen::handleEvents(const InputState& input)
         if (g_bottomScrollEnabled) {
             if (0 == directoryList->index()) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Backup selected title?",
+                    *this, i18n::t("main.confirm_backup_title"),
                     [this]() {
                         this->doBackup(hid.fullIndex(), 0);
                         TransferJob::get().start();
@@ -690,7 +695,7 @@ void MainScreen::handleEvents(const InputState& input)
             size_t index = directoryList->index();
             if (index > 0) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Delete selected backup?",
+                    *this, i18n::t("main.confirm_delete"),
                     [this, index]() {
                         Title title;
                         TitleCatalog::get().getTitle(title, hid.fullIndex(), backupKind);
@@ -758,7 +763,7 @@ void MainScreen::handleEvents(const InputState& input)
             [this]() {
                 std::string error;
                 if (!Transfer::startReceiver(error)) {
-                    this->currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, error.empty() ? "Failed to start receiver." : error);
+                    this->currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, error.empty() ? i18n::t("main.receiver_failed") : error);
                     return;
                 }
                 this->currentOverlay = std::make_shared<ReceiveOverlay>(*this);
@@ -787,7 +792,7 @@ void MainScreen::handleEvents(const InputState& input)
         if ((activityLog ? buttonBackupAL : buttonBackup)->released() || (kDown & KEY_L)) {
             if (g_bottomScrollEnabled) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Backup selected save?",
+                    *this, i18n::t("main.confirm_backup_save"),
                     [this]() {
                         this->doBackup(hid.fullIndex(), directoryList->index());
                         TransferJob::get().start();
@@ -806,7 +811,7 @@ void MainScreen::handleEvents(const InputState& input)
 
     if (activityLog && buttonPlayCoins->released()) {
         if (!Archive::setPlayCoins()) {
-            currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, "Failed to set play coins.");
+            currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.coins_failed"));
         }
     }
 }
@@ -844,13 +849,13 @@ std::string MainScreen::nameFromCell(size_t index) const
 void MainScreen::startTransferSend(void)
 {
     if (TitleCatalog::get().getTitleCount(backupKind) <= 0) {
-        currentOverlay = std::make_shared<InfoOverlay>(*this, "No titles available.");
+        currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.no_titles"));
         return;
     }
 
     size_t cellIndex = directoryList->index();
     if (!g_bottomScrollEnabled || cellIndex == 0) {
-        currentOverlay = std::make_shared<InfoOverlay>(*this, "Select a backup to send.");
+        currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.select_backup_send"));
         return;
     }
 
@@ -861,22 +866,22 @@ void MainScreen::startTransferSend(void)
     std::string backupName    = nameFromCell(cellIndex);
     std::u16string backupPath = target.fullPath(cellIndex);
 
-    std::string ipPort = KeyboardManager::get().text("", "Receiver IP:PORT", 32);
+    std::string ipPort = KeyboardManager::get().text("", i18n::t("main.receiver_ip_port"), 32);
     if (ipPort.empty()) {
         return;
     }
     auto dst = Transfer::parseTarget(ipPort);
     if (!dst) {
-        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, "Invalid IP:PORT.");
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.invalid_ip_port"));
         return;
     }
 
-    std::string pin = KeyboardManager::get().text("1234", "PIN (4 digits)", 5);
+    std::string pin = KeyboardManager::get().text("1234", i18n::t("main.pin_prompt"), 5);
     if (pin.empty()) {
         return;
     }
     if (!Transfer::validPin(pin)) {
-        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, "PIN must be 4 digits.");
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.pin_invalid"));
         return;
     }
 

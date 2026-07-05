@@ -27,6 +27,7 @@
 #include "TitlePickerOverlay.hpp"
 #include "colors.hpp"
 #include "gfxutils.hpp"
+#include "i18n.hpp"
 #include "shapes.hpp"
 #include "uikit.hpp"
 
@@ -55,7 +56,7 @@ void TitlePickerOverlay::draw(void) const
     Gfx::DrawText(20, LIST_X, PANEL_Y + 20, COLOR_TEXT, mHeading.c_str());
 
     if (mItems.empty()) {
-        Gfx::DrawText(15, LIST_X, LIST_Y + 8, COLOR_TEXT2, "No titles available.");
+        Gfx::DrawText(15, LIST_X, LIST_Y + 8, COLOR_TEXT2, i18n::t("main.no_titles").c_str());
     }
 
     for (int i = mScroll; i < (int)mItems.size() && i < mScroll + VISIBLE; i++) {
@@ -73,8 +74,8 @@ void TitlePickerOverlay::draw(void) const
     }
 
     UiKit::drawHintBar({
-        {"A", "Choose"},
-        {"B", "Cancel"},
+        {"A", i18n::t("overlay.choose")},
+        {"B", i18n::t("common.cancel")},
     });
 }
 

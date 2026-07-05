@@ -27,6 +27,7 @@
 #include "TitlePickerOverlay.hpp"
 #include "glyphs.hpp"
 #include "gui.hpp"
+#include "i18n.hpp"
 #include "loader.hpp"
 #include "textpool.hpp"
 #include "title.hpp"
@@ -60,7 +61,7 @@ int TitlePickerOverlay::rowCount(void) const
 
 void TitlePickerOverlay::drawEmptyMessage(void) const
 {
-    TextPool::get().drawCentered("No titles available.", 0, 400, 110, 0.5f, COLOR_MUTED, OVERLAY_Z);
+    TextPool::get().drawCentered(i18n::t("main.no_titles"), 0, 400, 110, 0.5f, COLOR_MUTED, OVERLAY_Z);
 }
 
 void TitlePickerOverlay::drawRowContent(int k, int rowY, bool selected) const
@@ -75,7 +76,7 @@ void TitlePickerOverlay::drawRowContent(int k, int rowY, bool selected) const
 
 std::string TitlePickerOverlay::bottomHints(void) const
 {
-    return std::string(GLYPH_A) + " Select      " + GLYPH_B + " Cancel";
+    return std::string(GLYPH_A) + " " + i18n::t("overlay.select") + "      " + GLYPH_B + " " + i18n::t("common.cancel");
 }
 
 void TitlePickerOverlay::update(const InputState& input)

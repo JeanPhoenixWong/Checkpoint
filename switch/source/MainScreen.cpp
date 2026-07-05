@@ -28,6 +28,7 @@
 #include "SettingsScreen.hpp"
 #include "backupsize.hpp"
 #include "gfxutils.hpp"
+#include "i18n.hpp"
 #include "main.hpp"
 #include "savedatasource.hpp"
 #include "savekind.hpp"
@@ -84,13 +85,13 @@ namespace {
     {
         switch (stage) {
             case io::BackupStage::OpenArchive:
-                return "Failed to mount save.";
+                return i18n::t("outcome.mount");
             case io::BackupStage::DeleteDst:
-                return "Failed to delete the existing backup\ndirectory recursively.";
+                return i18n::t("outcome.delete_dst");
             case io::BackupStage::CreateDst:
-                return "Failed to create destination directory.";
+                return i18n::t("outcome.create_dst");
             default:
-                return "Failed to backup save.";
+                return i18n::t("outcome.backup_failed");
         }
     }
 
@@ -98,13 +99,13 @@ namespace {
     {
         switch (stage) {
             case io::BackupStage::OpenArchive:
-                return "Failed to mount save.";
+                return i18n::t("outcome.mount");
             case io::BackupStage::DeleteDst:
-                return "Failed to delete save.";
+                return i18n::t("outcome.delete_save");
             case io::BackupStage::Commit:
-                return "Failed to commit to save device.";
+                return i18n::t("outcome.commit");
             default:
-                return "Failed to restore save.";
+                return i18n::t("outcome.restore_failed");
         }
     }
 
@@ -160,8 +161,8 @@ MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, i
     snprintf(ver, sizeof(ver), "v%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
 
     backupList    = std::make_unique<BackupList>(COL_X, LIST_Y, COL_W, LIST_ROWS * BackupList::ROW_PITCH, LIST_ROWS);
-    buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, "Backup", true);
-    buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, "Restore", true);
+    buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup"), true);
+    buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("main.restore"), true);
 
     // The rail Clickables exist only so released() can hit-test touches; the
     // rail is drawn by drawRailItem, not by Clickable::draw.
@@ -328,8 +329,9 @@ void MainScreen::draw() const
         ty += (int)h1 + 4;
         if (hasPlay) {
             u32 lblW;
-            Gfx::GetTextDimensions(13, "Play time ", &lblW, NULL);
-            Gfx::DrawText(13, infoX, ty, COLOR_TEXT2, "Play time ");
+            std::string playLbl = i18n::t("main.play_time") + " ";
+            Gfx::GetTextDimensions(13, playLbl.c_str(), &lblW, NULL);
+            Gfx::DrawText(13, infoX, ty, COLOR_TEXT2, playLbl.c_str());
             Gfx::DrawText(13, infoX + (int)lblW, ty, COLOR_TEXT, title.playTime().c_str());
             ty += (int)h2 + 4;
         }
@@ -337,7 +339,7 @@ void MainScreen::draw() const
 
         // Backups header row.
         const int headerY      = 184;
-        std::string countLabel = StringUtils::format("BACKUPS · %zu", backupList->backupCount());
+        std::string countLabel = i18n::t("main.backups_count", {std::to_string(backupList->backupCount())});
         u32 clH;
         Gfx::GetTextDimensions(11, countLabel.c_str(), NULL, &clH);
         UiKit::drawSectionLabel(COL_X, headerY, countLabel.c_str());
@@ -358,30 +360,31 @@ void MainScreen::draw() const
         if (MS::multipleSelectionEnabled()) {
             // Multi-select is a batch backup only (no restore): show a single
             // button counting the selected titles, wired to the same L handler.
-            const size_t n        = selEnt.size();
-            const std::string lbl = StringUtils::format("Backup %zu %s", n, n == 1 ? "title" : "titles");
+            const size_t n = selEnt.size();
+            const std::string lbl =
+                n == 1 ? i18n::t("main.backup_n_title", {std::to_string(n)}) : i18n::t("main.backup_n_titles", {std::to_string(n)});
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
-            drawActionButton(COL_X, BTN_BACKUP_Y, "Backup", "L", true);
-            drawActionButton(COL_X, BTN_RESTORE_Y, "Restore", "R", false);
+            drawActionButton(COL_X, BTN_BACKUP_Y, i18n::t("main.backup"), "L", true);
+            drawActionButton(COL_X, BTN_RESTORE_Y, i18n::t("main.restore"), "R", false);
         }
     }
     else {
-        const char* emptyMsg = SaveKind::of(mSaveTypeFilter).emptyMsg;
+        std::string emptyMsg = i18n::t(SaveKind::of(mSaveTypeFilter).emptyMsg);
         u32 emptyW, emptyH;
-        Gfx::GetTextDimensions(18, emptyMsg, &emptyW, &emptyH);
-        Gfx::DrawText(18, GRID_AREA_X + (GRID_AREA_W - (int)emptyW) / 2, (720 - (int)emptyH) / 2, COLOR_TEXT2, emptyMsg);
+        Gfx::GetTextDimensions(18, emptyMsg.c_str(), &emptyW, &emptyH);
+        Gfx::DrawText(18, GRID_AREA_X + (GRID_AREA_W - (int)emptyW) / 2, (720 - (int)emptyH) / 2, COLOR_TEXT2, emptyMsg.c_str());
     }
 
     // ---- Hint bar ----
     // Minus opens Settings (see the class note); no help overlay in this build.
     UiKit::drawHintBar({
-        {"A", "Select"},
-        {"B", "Back"},
-        {"X", "Sort"},
-        {"Y", "Multi-select"},
-        {"-", "Settings"},
+        {"A", i18n::t("hint.select")},
+        {"B", i18n::t("hint.back")},
+        {"X", i18n::t("hint.sort")},
+        {"Y", i18n::t("hint.multiselect")},
+        {"-", i18n::t("hint.settings")},
     });
 
     // ---- Transfer modal ----
@@ -395,13 +398,13 @@ void MainScreen::draw() const
         const int my = multiSelect ? 230 : 260;
         Shapes::cardRound(mx, my, mw, mh, 0, COLOR_SURFACE, COLOR_STROKE2, 1);
 
-        std::string titleStr = (transfer.mode.empty() ? "Copying files" : transfer.mode) + " in progress...";
+        std::string titleStr = i18n::t("main.in_progress", {transfer.mode.empty() ? i18n::t("main.copying") : transfer.mode});
         u32 title_w, title_h;
         Gfx::GetTextDimensions(20, titleStr.c_str(), &title_w, &title_h);
         Gfx::DrawText(20, mx + (mw - (int)title_w) / 2, my + 16, COLOR_TEXT, titleStr.c_str());
 
         if (transfer.cancellable) {
-            const std::string hint = UiKit::buttonGlyph("B") + " to cancel";
+            const std::string hint = UiKit::buttonGlyph("B") + " " + i18n::t("main.to_cancel");
             u32 hint_w;
             Gfx::GetTextDimensions(14, hint.c_str(), &hint_w, NULL);
             Gfx::DrawText(14, mx + mw - (int)hint_w - 16, my + mh - 26, COLOR_TEXT2, hint.c_str());
@@ -429,21 +432,19 @@ void MainScreen::draw() const
 
         int barY = my + 108;
         if (multiSelect) {
-            float overallProgress = (float)transfer.saveCount / (float)transfer.saveTotal;
-            char overallCountStr[24];
-            snprintf(overallCountStr, sizeof(overallCountStr), "Save %zu / %zu", transfer.saveCount + 1, transfer.saveTotal);
+            float overallProgress       = (float)transfer.saveCount / (float)transfer.saveTotal;
+            std::string overallCountStr = i18n::t("main.save_n", {std::to_string(transfer.saveCount + 1), std::to_string(transfer.saveTotal)});
             char overallPctStr[8];
             snprintf(overallPctStr, sizeof(overallPctStr), "%d%%", (int)(overallProgress * 100));
-            drawProgressBar(barY, overallProgress, overallCountStr, overallPctStr);
+            drawProgressBar(barY, overallProgress, overallCountStr.c_str(), overallPctStr);
             barY += 52;
         }
 
-        float progress = (transfer.copyTotal > 0) ? (float)transfer.copyCount / (float)transfer.copyTotal : 0.0f;
-        char countStr[24];
-        snprintf(countStr, sizeof(countStr), "File %zu / %zu", transfer.copyCount, transfer.copyTotal);
+        float progress       = (transfer.copyTotal > 0) ? (float)transfer.copyCount / (float)transfer.copyTotal : 0.0f;
+        std::string countStr = i18n::t("main.file_n", {std::to_string(transfer.copyCount), std::to_string(transfer.copyTotal)});
         char pctStr[8];
         snprintf(pctStr, sizeof(pctStr), "%d%%", (int)((progress > 1.0f ? 1.0f : progress) * 100));
-        drawProgressBar(barY, progress, countStr, pctStr);
+        drawProgressBar(barY, progress, countStr.c_str(), pctStr);
         barY += 52;
 
         float fileProgress = (transfer.currentFileSize > 0) ? (float)transfer.currentFileOffset / (float)transfer.currentFileSize : 0.0f;
@@ -467,7 +468,7 @@ void MainScreen::update(const InputState& input)
             BackupSizeCache::get().invalidate(id); // folders changed → recompute sizes
         }
         if (result->cancelled) {
-            currentOverlay = std::make_shared<InfoOverlay>(*this, "Backup cancelled.");
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.backup_cancelled"));
         }
         else if (result->ok) {
             blinkLed(4);
@@ -578,9 +579,7 @@ void MainScreen::doBackup(size_t rawIdx, size_t cellIndex)
         return;
     }
 
-    std::string successMsg = usedKeyboardFallback ? "Progress correctly saved to disk.\nSystem keyboard applet was not\naccessible. The suggested "
-                                                    "destination\nfolder was used instead."
-                                                  : "Progress correctly saved to disk.";
+    std::string successMsg = usedKeyboardFallback ? i18n::t("main.backup_success_fallback") : i18n::t("main.backup_success");
     TransferJob::get().enqueueBackup(std::move(title), *dst, std::move(successMsg));
 }
 
@@ -592,7 +591,7 @@ void MainScreen::doRestore(size_t rawIdx, size_t cellIndex)
     std::string src  = title.fullPath(cellIndex) + "/";
     removeOverlay();
 
-    TransferJob::get().enqueueRestore(std::move(title), std::move(src), name + "\nhas been restored successfully.");
+    TransferJob::get().enqueueRestore(std::move(title), std::move(src), i18n::t("main.restore_success", {name}));
 }
 
 void MainScreen::requestRestoreSelected(void)
@@ -601,7 +600,7 @@ void MainScreen::requestRestoreSelected(void)
     // confirm-restore toggle (Settings > General) can skip the prompt.
     if (Configuration::getInstance().isConfirmRestoreEnabled()) {
         currentOverlay = std::make_shared<YesNoOverlay>(
-            *this, "Restore selected save?",
+            *this, i18n::t("main.confirm_restore"),
             [this]() {
                 doRestore(rawIndex(), this->index(CELLS));
                 TransferJob::get().start();
@@ -734,7 +733,7 @@ void MainScreen::handleEvents(const InputState& input)
             size_t index = this->index(CELLS);
             if (index > 0) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
-                    *this, "Delete selected backup?",
+                    *this, i18n::t("main.confirm_delete"),
                     [this, index]() {
                         Title title;
                         TitleCatalog::get().getTitle(title, g_currentUId, rawIndex());
@@ -803,7 +802,7 @@ void MainScreen::handleEvents(const InputState& input)
         }
         else if (backupScrollEnabled) {
             currentOverlay = std::make_shared<YesNoOverlay>(
-                *this, "Backup selected save?",
+                *this, i18n::t("main.confirm_backup_save"),
                 [this]() {
                     doBackup(rawIndex(), this->index(CELLS));
                     TransferJob::get().start();

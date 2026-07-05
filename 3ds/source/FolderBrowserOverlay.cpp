@@ -29,6 +29,7 @@
 #include "directory.hpp"
 #include "glyphs.hpp"
 #include "gui.hpp"
+#include "i18n.hpp"
 #include "textpool.hpp"
 #include "util.hpp"
 #include <3ds.h>
@@ -88,8 +89,8 @@ void FolderBrowserOverlay::drawHeaderExtra(void) const
 void FolderBrowserOverlay::drawEmptyMessage(void) const
 {
     TextPool& text = TextPool::get();
-    text.drawCentered("No sub-folders here.", 0, 400, 120, 0.46f, COLOR_MUTED, OVERLAY_Z);
-    text.drawCentered("Press X to use this folder.", 0, 400, 142, 0.42f, COLOR_FAINT, OVERLAY_Z);
+    text.drawCentered(i18n::t("overlay.no_subfolders"), 0, 400, 120, 0.46f, COLOR_MUTED, OVERLAY_Z);
+    text.drawCentered(i18n::t("overlay.use_folder_hint"), 0, 400, 142, 0.42f, COLOR_FAINT, OVERLAY_Z);
 }
 
 void FolderBrowserOverlay::drawRowContent(int k, int rowY, bool selected) const
@@ -103,7 +104,8 @@ void FolderBrowserOverlay::drawRowContent(int k, int rowY, bool selected) const
 std::string FolderBrowserOverlay::bottomHints(void) const
 {
     const bool atRoot = mCurrent == u"/";
-    return std::string(GLYPH_A) + " Open   " + GLYPH_X + " Use folder   " + GLYPH_B + (atRoot ? " Cancel" : " Up");
+    return std::string(GLYPH_A) + " " + i18n::t("overlay.open") + "   " + GLYPH_X + " " + i18n::t("overlay.use_folder") + "   " + GLYPH_B + " " +
+           (atRoot ? i18n::t("common.cancel") : i18n::t("overlay.up"));
 }
 
 void FolderBrowserOverlay::update(const InputState& input)

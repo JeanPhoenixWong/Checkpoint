@@ -29,10 +29,10 @@
 const std::array<SaveKind, 4>& SaveKind::all()
 {
     static const std::array<SaveKind, 4> kinds = {{
-        {FILTER_SAVES, "U", "USER", "No saves", FsSaveDataType_Account},
-        {FILTER_BCAT, "B", "BCAT", "No BCAT saves", FsSaveDataType_Bcat},
-        {FILTER_DEVICE, "D", "DEVICE", "No Device saves", FsSaveDataType_Device},
-        {FILTER_SYSTEM, "S", "SYSTEM", "No System saves", FsSaveDataType_System},
+        {FILTER_SAVES, "U", "USER", "savekind.empty.user", FsSaveDataType_Account},
+        {FILTER_BCAT, "B", "BCAT", "savekind.empty.bcat", FsSaveDataType_Bcat},
+        {FILTER_DEVICE, "D", "DEVICE", "savekind.empty.device", FsSaveDataType_Device},
+        {FILTER_SYSTEM, "S", "SYSTEM", "savekind.empty.system", FsSaveDataType_System},
     }};
     return kinds;
 }

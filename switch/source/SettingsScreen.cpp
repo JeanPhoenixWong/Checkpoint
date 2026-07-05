@@ -203,7 +203,7 @@ void SettingsScreen::rebuildRows(void)
             sort.subtitle = i18n::t("settings.general.sort.sub");
             sort.control  = Control::Spinner;
             for (const SortMode& m : SortMode::all()) {
-                sort.options.push_back(m.label);
+                sort.options.push_back(i18n::t(m.label));
             }
             sort.getIndex = []() { return (int)TitleCatalog::get().sortMode(); };
             sort.onCycle  = [this](int delta) {

@@ -27,14 +27,16 @@
 #include "TransferOverlay.hpp"
 #include "ModalChrome.hpp"
 #include "common.hpp"
+#include "i18n.hpp"
 #include "main.hpp"
 #include "textpool.hpp"
 #include "transfer.hpp"
 #include "transferstatus.hpp"
 
 TransferMenuOverlay::TransferMenuOverlay(Screen& screen, const std::function<void()>& callbackSend, const std::function<void()>& callbackReceive)
-    : ChoiceOverlay(screen, "Choose Send or Receive", Button{"Send", ModalChrome::BTN_LEFT_X, COLOR_ACCENT, COLOR_WHITE, KEY_R, callbackSend},
-          Button{"Receive", ModalChrome::BTN_RIGHT_X, COLOR_RAISED, COLOR_TEXT, KEY_B, callbackReceive}, KEY_START)
+    : ChoiceOverlay(screen, i18n::t("transfer.choose"),
+          Button{i18n::t("transfer.send"), ModalChrome::BTN_LEFT_X, COLOR_ACCENT, COLOR_WHITE, KEY_R, callbackSend},
+          Button{i18n::t("transfer.receive"), ModalChrome::BTN_RIGHT_X, COLOR_RAISED, COLOR_TEXT, KEY_B, callbackReceive}, KEY_START)
 {
 }
 
@@ -59,10 +61,10 @@ void ReceiveOverlay::drawBottom(void) const
     if (completed && !networkActive) {
         std::string backupName = Transfer::receiverCompletedName();
         if (backupName.empty()) {
-            backupName = "(unnamed backup)";
+            backupName = i18n::t("transfer.unnamed");
         }
 
-        text.draw("File received", 40, 60, 0.65f, COLOR_TEXT);
+        text.draw(i18n::t("transfer.file_received"), 40, 60, 0.65f, COLOR_TEXT);
         text.draw(backupName, 40, 92, 0.52f, COLOR_MUTED);
 
         std::string notice = Transfer::receiverNotice();
@@ -70,17 +72,17 @@ void ReceiveOverlay::drawBottom(void) const
             text.draw(notice, 40, 122, 0.45f, COLOR_MUTED);
         }
 
-        text.draw("Press A (OK) to refresh now", 40, 170, 0.5f, COLOR_MUTED);
+        text.draw(i18n::t("transfer.refresh_hint"), 40, 170, 0.5f, COLOR_MUTED);
         return;
     }
 
-    std::string info = "Receiver active";
+    std::string info = i18n::t("transfer.receiver_active");
     if (Transfer::receiverRunning()) {
         info = StringUtils::format(
             "IP: %s\nPort: %d\nPIN: %s", Transfer::receiverIp().c_str(), Transfer::receiverPort(), Transfer::receiverToken().c_str());
     }
     else {
-        info = "Receiver stopped";
+        info = i18n::t("transfer.receiver_stopped");
     }
 
     text.draw(info, 40, 60, 0.55f, COLOR_TEXT);
@@ -89,7 +91,7 @@ void ReceiveOverlay::drawBottom(void) const
     if (networkActive) {
         u64 total = ts.bytesTotal, done = ts.bytesDone;
         int pct            = total > 0 ? (int)((done * 100) / total) : 0;
-        std::string prefix = ts.mode.empty() ? "Downloading backup" : ts.mode;
+        std::string prefix = ts.mode.empty() ? i18n::t("transfer.downloading") : ts.mode;
         std::string status = StringUtils::format("%s... %d%% (%s)", prefix.c_str(), pct, TransferStatus::bytesToMB(done, total).c_str());
         text.draw(status, 40, 120, 0.5f, COLOR_MUTED);
         noticeY = 142;
@@ -100,7 +102,7 @@ void ReceiveOverlay::drawBottom(void) const
         text.draw(notice, 40, noticeY, 0.45f, COLOR_MUTED);
     }
 
-    text.draw("Press B to close", 40, 170, 0.5f, COLOR_MUTED);
+    text.draw(i18n::t("transfer.close_hint"), 40, 170, 0.5f, COLOR_MUTED);
 }
 
 void ReceiveOverlay::update(const InputState& input)

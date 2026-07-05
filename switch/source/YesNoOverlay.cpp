@@ -26,6 +26,7 @@
 
 #include "YesNoOverlay.hpp"
 #include "gfxutils.hpp"
+#include "i18n.hpp"
 
 YesNoOverlay::YesNoOverlay(
     Screen& screen, const std::string& mtext, const std::function<void()>& callbackYes, const std::function<void()>& callbackNo)
@@ -35,8 +36,8 @@ YesNoOverlay::YesNoOverlay(
     yesFunc = callbackYes;
     noFunc  = callbackNo;
     Gfx::GetTextDimensions(28, text.c_str(), &textw, &texth);
-    buttonYes = std::make_unique<Clickable>(322, 462, 316, 56, COLOR_SURFACE, COLOR_TEXT, "Yes", true);
-    buttonNo  = std::make_unique<Clickable>(642, 462, 316, 56, COLOR_SURFACE, COLOR_TEXT, "No", true);
+    buttonYes = std::make_unique<Clickable>(322, 462, 316, 56, COLOR_SURFACE, COLOR_TEXT, i18n::t("common.yes"), true);
+    buttonNo  = std::make_unique<Clickable>(642, 462, 316, 56, COLOR_SURFACE, COLOR_TEXT, i18n::t("common.no"), true);
 }
 
 void YesNoOverlay::draw(void) const
