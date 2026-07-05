@@ -72,7 +72,10 @@ namespace io {
     Result copyDirectory(const std::string& srcPath, const std::string& dstPath, ProgressSink& sink, u64 commitWriteLimit = 0);
     Result copyFile(const std::string& srcPath, const std::string& dstPath, ProgressSink& sink, u64 commitWriteLimit = 0);
     Result createDirectory(const std::string& path);
-    Result deleteFolderRecursively(const std::string& path);
+    // Deletes everything under `path`; with `removeRoot` also removes `path`
+    // itself. Pass false when `path` is a mount root (e.g. "save:/"), which can
+    // never be rmdir'd.
+    Result deleteFolderRecursively(const std::string& path, bool removeRoot = true);
     bool directoryExists(const std::string& path);
     bool fileExists(const std::string& path);
 }

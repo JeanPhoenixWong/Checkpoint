@@ -240,7 +240,7 @@ bool io::directoryExists(const std::string& path)
     return (stat(path.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode));
 }
 
-Result io::deleteFolderRecursively(const std::string& path)
+Result io::deleteFolderRecursively(const std::string& path, bool removeRoot)
 {
     Directory dir(path);
     if (!dir.good()) {
@@ -270,7 +270,9 @@ Result io::deleteFolderRecursively(const std::string& path)
         }
     }
 
-    note(rmdir(path.c_str()));
+    if (removeRoot) {
+        note(rmdir(path.c_str()));
+    }
     return firstError;
 }
 
@@ -374,7 +376,7 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
 
     std::string dstPath = "save:/";
 
-    res = io::deleteFolderRecursively(dstPath.c_str());
+    res = io::deleteFolderRecursively(dstPath.c_str(), false);
     if (R_FAILED(res)) {
         FileSystem::unmountDevice();
         Logging::error("Failed to recursively delete directory {} with result 0x{:08X}.", dstPath, res);
