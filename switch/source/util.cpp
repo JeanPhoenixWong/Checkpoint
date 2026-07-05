@@ -25,6 +25,8 @@
  */
 
 #include "util.hpp"
+#include "configuration.hpp"
+#include "i18n.hpp"
 #include "logging.hpp"
 #include "main.hpp"
 #include "server.hpp"
@@ -122,6 +124,10 @@ Result servicesInit(void)
     }
 
     Configuration::getInstance();
+
+    // Load localized strings before any screen draws.
+    i18n::init("romfs:/i18n.json");
+    i18n::setLanguage(Configuration::getInstance().language());
 
     if (R_SUCCEEDED(socinit)) {
         if (R_SUCCEEDED(res = ftp_init())) {

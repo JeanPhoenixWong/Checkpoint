@@ -26,7 +26,9 @@
 
 #include "util.hpp"
 #include "backupsize.hpp"
+#include "configuration.hpp"
 #include "ftpserver.hpp"
+#include "i18n.hpp"
 #include "loader.hpp"
 #include "server.hpp"
 #include "thread.hpp"
@@ -90,6 +92,11 @@ Result servicesInit(void)
 
     romfsInit();
     ATEXIT(romfsExit);
+
+    // Load localized strings before any screen draws. Configuration's singleton
+    // is constructed on first access here, so the language is available at boot.
+    i18n::init("romfs:/i18n.json");
+    i18n::setLanguage(Configuration::getInstance().language());
 
     srvInit();
     ATEXIT(srvExit);

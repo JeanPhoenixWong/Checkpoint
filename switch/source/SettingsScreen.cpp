@@ -30,6 +30,7 @@
 #include "colors.hpp"
 #include "configuration.hpp"
 #include "gfxutils.hpp"
+#include "i18n.hpp"
 #include "logging.hpp"
 #include "main.hpp"
 #include "server.hpp"
@@ -67,7 +68,16 @@ namespace {
     constexpr int ROWS_Y0           = TOPBAR_H + 24;
     constexpr int SECTION_GAP_ABOVE = 12;
 
-    const std::array<const char*, 6> kCategoryLabels = {"General", "Library", "Save folders", "Connectivity", "Logs", "About"};
+    // i18n keys, resolved at draw time so a live language change is seen without
+    // rebuilding (the rail draws every frame).
+    const std::array<const char*, 6> kCategoryKeys = {"settings.cat.general", "settings.cat.library", "settings.cat.save_folders",
+        "settings.cat.connectivity", "settings.cat.logs", "settings.cat.about"};
+
+    // Display name for a language code, in its own language (never localized).
+    const char* languageName(const std::string& code)
+    {
+        return code == "it" ? "Italiano" : "English";
+    }
 
     // Log viewer: monospace body text, tight line spacing so a useful number of
     // lines fit the pane.
@@ -154,11 +164,11 @@ void SettingsScreen::rebuildRows(void)
     switch (mCategory) {
         case Category::General: {
             Row theme;
-            theme.title    = "Theme";
-            theme.subtitle = "Applies immediately";
+            theme.title    = i18n::t("settings.general.theme");
+            theme.subtitle = i18n::t("settings.general.theme.sub");
             theme.control  = Control::Segmented;
-            theme.section  = "APPEARANCE";
-            theme.options  = {"Dark", "Light"};
+            theme.section  = i18n::t("settings.section.appearance");
+            theme.options  = {i18n::t("settings.theme.dark"), i18n::t("settings.theme.light")};
             theme.getIndex = [&cfg]() { return cfg.theme() == "light" ? 1 : 0; };
             // Theme flips on A only (no onCycle): left/right on the d-pad must
             // not change it, so an accidental horizontal press can't swap themes.
@@ -169,9 +179,28 @@ void SettingsScreen::rebuildRows(void)
             };
             mRows.push_back(std::move(theme));
 
+            // Language, in the Appearance section next to Theme. Segmented, flips
+            // on A only (like Theme). The option names stay in their own language.
+            // A change defers a rebuild so every row picks up the new language.
+            Row language;
+            language.title      = i18n::t("settings.general.language");
+            language.subtitle   = i18n::t("settings.general.language.sub");
+            language.control    = Control::Segmented;
+            language.section    = i18n::t("settings.section.appearance");
+            language.options    = {languageName("en"), languageName("it")};
+            language.getIndex   = []() { return i18n::language() == "it" ? 1 : 0; };
+            language.onActivate = [this, &cfg]() {
+                const std::string next = i18n::language() == "en" ? "it" : "en";
+                cfg.setLanguage(next);
+                i18n::setLanguage(next);
+                flashSaved();
+                mNeedsRebuild = true;
+            };
+            mRows.push_back(std::move(language));
+
             Row sort;
-            sort.title    = "Default sort";
-            sort.subtitle = "Order of the title grid at launch";
+            sort.title    = i18n::t("settings.general.sort");
+            sort.subtitle = i18n::t("settings.general.sort.sub");
             sort.control  = Control::Spinner;
             for (const SortMode& m : SortMode::all()) {
                 sort.options.push_back(m.label);
@@ -186,10 +215,10 @@ void SettingsScreen::rebuildRows(void)
             mRows.push_back(std::move(sort));
 
             Row confirmRestore;
-            confirmRestore.title      = "Confirm before restore";
-            confirmRestore.subtitle   = "Ask before overwriting a save on restore";
+            confirmRestore.title      = i18n::t("settings.general.confirm_restore");
+            confirmRestore.subtitle   = i18n::t("settings.general.confirm_restore.sub");
             confirmRestore.control    = Control::Toggle;
-            confirmRestore.section    = "SAFETY";
+            confirmRestore.section    = i18n::t("settings.section.safety");
             confirmRestore.getOn      = [&cfg]() { return cfg.isConfirmRestoreEnabled(); };
             confirmRestore.onActivate = [this, &cfg]() {
                 cfg.setConfirmRestoreEnabled(!cfg.isConfirmRestoreEnabled());
@@ -198,10 +227,10 @@ void SettingsScreen::rebuildRows(void)
             mRows.push_back(std::move(confirmRestore));
 
             Row quickBackup;
-            quickBackup.title      = "Skip backup name prompt";
-            quickBackup.subtitle   = "Use the timestamp, no keyboard";
+            quickBackup.title      = i18n::t("settings.general.quick_backup");
+            quickBackup.subtitle   = i18n::t("settings.general.quick_backup.sub");
             quickBackup.control    = Control::Toggle;
-            quickBackup.section    = "SAFETY";
+            quickBackup.section    = i18n::t("settings.section.safety");
             quickBackup.getOn      = [&cfg]() { return cfg.isQuickBackupEnabled(); };
             quickBackup.onActivate = [this, &cfg]() {
                 cfg.setQuickBackupEnabled(!cfg.isQuickBackupEnabled());
@@ -213,20 +242,20 @@ void SettingsScreen::rebuildRows(void)
         case Category::Connectivity: {
             // Log server rows are read-only status mirrors: info rows, no
             // controls, not focusable (nothing to operate here).
-            auto info = [](const char* title, std::string subtitle, const char* section = "") {
+            auto info = [](std::string title, std::string subtitle, std::string section = "") {
                 Row r;
-                r.title     = title;
+                r.title     = std::move(title);
                 r.subtitle  = std::move(subtitle);
-                r.section   = section;
+                r.section   = std::move(section);
                 r.focusable = false;
                 return r;
             };
 
             Row ftp;
-            ftp.title      = "FTP server";
-            ftp.subtitle   = "Browse backups from a computer";
+            ftp.title      = i18n::t("settings.conn.ftp");
+            ftp.subtitle   = i18n::t("settings.conn.ftp.sub");
             ftp.control    = Control::Toggle;
-            ftp.section    = "CONNECTIVITY";
+            ftp.section    = i18n::t("settings.section.connectivity");
             ftp.getOn      = [&cfg]() { return cfg.isFTPEnabled(); };
             ftp.onActivate = [this, &cfg]() {
                 cfg.setFTPEnabled(!cfg.isFTPEnabled());
@@ -236,16 +265,17 @@ void SettingsScreen::rebuildRows(void)
                 if (!cfg.isFTPEnabled())
                     return "";
                 const std::string& ip = consoleIp();
-                return ip.empty() ? "· running" : "· running on " + ip + ":50000";
+                return ip.empty() ? i18n::t("settings.conn.running") : i18n::t("settings.conn.running_on", {ip});
             };
             mRows.push_back(std::move(ftp));
 
             // Address of the built-in HTTP log server (parity with the 3DS build).
             // Open it from any browser on the same network to read the logs.
             const std::string addr = Server::getAddress();
-            mRows.push_back(info("Log server", addr.empty() ? "Unavailable" : addr + "/logs/memory", "LOGS"));
+            mRows.push_back(info(i18n::t("settings.conn.log_server"), addr.empty() ? i18n::t("common.unavailable") : addr + "/logs/memory",
+                i18n::t("settings.section.logs")));
             if (!addr.empty()) {
-                mRows.push_back(info("Full log file", addr + "/logs/file"));
+                mRows.push_back(info(i18n::t("settings.conn.full_log"), addr + "/logs/file"));
             }
             break;
         }
@@ -268,9 +298,9 @@ void SettingsScreen::rebuildRows(void)
                 r.iconId    = id;
                 r.title     = nameOf(id);
                 r.subtitle  = StringUtils::format("%016llX", id);
-                r.pillLabel = "Unfavorite";
+                r.pillLabel = i18n::t("settings.library.unfavorite");
                 if (i == 0)
-                    r.section = "FAVORITES";
+                    r.section = i18n::t("settings.section.favorites");
                 r.onActivate = [this, id, &cfg]() {
                     cfg.setFavorite(id, false);
                     flashSaved();
@@ -281,11 +311,11 @@ void SettingsScreen::rebuildRows(void)
             {
                 Row add;
                 add.control   = Control::ActionPill;
-                add.title     = "Add a favorite";
-                add.subtitle  = "Pin a title to the top of the grid";
-                add.pillLabel = "+ Add";
+                add.title     = i18n::t("settings.library.add_favorite");
+                add.subtitle  = i18n::t("settings.library.add_favorite.sub");
+                add.pillLabel = i18n::t("settings.pill.add");
                 if (favs.empty())
-                    add.section = "FAVORITES";
+                    add.section = i18n::t("settings.section.favorites");
                 add.onActivate = [this, names]() {
                     std::vector<std::pair<u64, std::string>> items;
                     std::vector<u64> cur = Configuration::getInstance().favoriteIds();
@@ -295,11 +325,12 @@ void SettingsScreen::rebuildRows(void)
                         if (!ex.count(id))
                             items.push_back({id, kv.second});
                     }
-                    currentOverlay = std::make_shared<TitlePickerOverlay>(*this, "Add a favorite", std::move(items), [this](u64 id) {
-                        Configuration::getInstance().setFavorite(id, true);
-                        flashSaved();
-                        mNeedsRebuild = true;
-                    });
+                    currentOverlay =
+                        std::make_shared<TitlePickerOverlay>(*this, i18n::t("settings.library.add_favorite"), std::move(items), [this](u64 id) {
+                            Configuration::getInstance().setFavorite(id, true);
+                            flashSaved();
+                            mNeedsRebuild = true;
+                        });
                 };
                 mRows.push_back(std::move(add));
             }
@@ -312,9 +343,9 @@ void SettingsScreen::rebuildRows(void)
                 r.iconId    = id;
                 r.title     = nameOf(id);
                 r.subtitle  = StringUtils::format("%016llX", id);
-                r.pillLabel = "Unhide";
+                r.pillLabel = i18n::t("settings.library.unhide");
                 if (i == 0)
-                    r.section = "HIDDEN TITLES";
+                    r.section = i18n::t("settings.section.hidden");
                 r.onActivate = [this, id, &cfg]() {
                     cfg.setFilter(id, false);
                     TitleCatalog::get().refreshHiddenFilter();
@@ -326,11 +357,11 @@ void SettingsScreen::rebuildRows(void)
             {
                 Row add;
                 add.control   = Control::ActionPill;
-                add.title     = "Hide a title";
-                add.subtitle  = "Remove a title from the grid";
-                add.pillLabel = "+ Add";
+                add.title     = i18n::t("settings.library.hide_title");
+                add.subtitle  = i18n::t("settings.library.hide_title.sub");
+                add.pillLabel = i18n::t("settings.pill.add");
                 if (hidden.empty())
-                    add.section = "HIDDEN TITLES";
+                    add.section = i18n::t("settings.section.hidden");
                 add.onActivate = [this, names]() {
                     std::vector<std::pair<u64, std::string>> items;
                     std::vector<u64> cur = Configuration::getInstance().hiddenIds();
@@ -340,12 +371,13 @@ void SettingsScreen::rebuildRows(void)
                         if (!ex.count(id))
                             items.push_back({id, kv.second});
                     }
-                    currentOverlay = std::make_shared<TitlePickerOverlay>(*this, "Hide a title", std::move(items), [this](u64 id) {
-                        Configuration::getInstance().setFilter(id, true);
-                        TitleCatalog::get().refreshHiddenFilter();
-                        flashSaved();
-                        mNeedsRebuild = true;
-                    });
+                    currentOverlay =
+                        std::make_shared<TitlePickerOverlay>(*this, i18n::t("settings.library.hide_title"), std::move(items), [this](u64 id) {
+                            Configuration::getInstance().setFilter(id, true);
+                            TitleCatalog::get().refreshHiddenFilter();
+                            flashSaved();
+                            mNeedsRebuild = true;
+                        });
                 };
                 mRows.push_back(std::move(add));
             }
@@ -364,9 +396,9 @@ void SettingsScreen::rebuildRows(void)
             // folder second. The pickers list only titles owning that save
             // kind, so system/BCAT titles never show up here.
             struct Kind {
-                const char* section;
-                const char* addTitle;
-                const char* addSubtitle;
+                std::string section;
+                std::string addTitle;
+                std::string addSubtitle;
                 u8 saveDataType;
                 std::vector<u64> (Configuration::*ids)(void);
                 std::vector<std::string> (Configuration::*folders)(u64);
@@ -374,11 +406,11 @@ void SettingsScreen::rebuildRows(void)
                 void (Configuration::*remove)(u64, const std::string&);
             };
             const Kind kinds[] = {
-                {"USER SAVE FOLDERS", "Add a save folder", "Pick a title, then an extra folder for its saves", FsSaveDataType_Account,
-                    &Configuration::additionalSaveFolderIds, &Configuration::additionalSaveFolders, &Configuration::addAdditionalSaveFolder,
-                    &Configuration::removeAdditionalSaveFolder},
-                {"DEVICE SAVE FOLDERS", "Add a device save folder", "Pick a title, then an extra folder for its device saves", FsSaveDataType_Device,
-                    &Configuration::additionalDeviceSaveFolderIds, &Configuration::additionalDeviceSaveFolders,
+                {i18n::t("settings.section.user_folders"), i18n::t("settings.folders.add_save"), i18n::t("settings.folders.add_save.sub"),
+                    FsSaveDataType_Account, &Configuration::additionalSaveFolderIds, &Configuration::additionalSaveFolders,
+                    &Configuration::addAdditionalSaveFolder, &Configuration::removeAdditionalSaveFolder},
+                {i18n::t("settings.section.device_folders"), i18n::t("settings.folders.add_device"), i18n::t("settings.folders.add_device.sub"),
+                    FsSaveDataType_Device, &Configuration::additionalDeviceSaveFolderIds, &Configuration::additionalDeviceSaveFolders,
                     &Configuration::addAdditionalDeviceSaveFolder, &Configuration::removeAdditionalDeviceSaveFolder},
             };
 
@@ -398,7 +430,7 @@ void SettingsScreen::rebuildRows(void)
                         r.iconId    = id;
                         r.title     = nameOf(id);
                         r.subtitle  = path;
-                        r.pillLabel = "Remove";
+                        r.pillLabel = i18n::t("settings.pill.remove");
                         if (first) {
                             r.section = kind.section;
                             first     = false;
@@ -417,20 +449,21 @@ void SettingsScreen::rebuildRows(void)
                 add.control   = Control::ActionPill;
                 add.title     = kind.addTitle;
                 add.subtitle  = kind.addSubtitle;
-                add.pillLabel = "+ Add";
+                add.pillLabel = i18n::t("settings.pill.add");
                 if (first)
                     add.section = kind.section;
                 add.onActivate = [this, addFn, type]() {
                     auto items     = TitleCatalog::get().titleListForSaveType(type);
-                    currentOverlay = std::make_shared<TitlePickerOverlay>(*this, "Choose a title", std::move(items), [this, addFn](u64 id) {
-                        currentOverlay =
-                            std::make_shared<FolderBrowserOverlay>(*this, "Choose a save folder", [this, addFn, id](const std::string& path) {
-                                (Configuration::getInstance().*addFn)(id, path);
-                                TitleCatalog::get().refreshDirectories(id);
-                                flashSaved();
-                                mNeedsRebuild = true;
-                            });
-                    });
+                    currentOverlay = std::make_shared<TitlePickerOverlay>(
+                        *this, i18n::t("settings.folders.choose_title"), std::move(items), [this, addFn](u64 id) {
+                            currentOverlay = std::make_shared<FolderBrowserOverlay>(
+                                *this, i18n::t("settings.folders.choose_folder"), [this, addFn, id](const std::string& path) {
+                                    (Configuration::getInstance().*addFn)(id, path);
+                                    TitleCatalog::get().refreshDirectories(id);
+                                    flashSaved();
+                                    mNeedsRebuild = true;
+                                });
+                        });
                 };
                 mRows.push_back(std::move(add));
             }
@@ -444,23 +477,23 @@ void SettingsScreen::rebuildRows(void)
         }
         case Category::About: {
             Row v;
-            v.section  = "ABOUT";
-            v.title    = "Version";
+            v.section  = i18n::t("settings.section.about");
+            v.title    = i18n::t("settings.about.version");
             v.subtitle = mVer;
             mRows.push_back(std::move(v));
 
             Row a;
-            a.title    = "Author";
+            a.title    = i18n::t("settings.about.author");
             a.subtitle = "Bernardo Giordano";
             mRows.push_back(std::move(a));
 
             Row g;
-            g.title    = "Source";
+            g.title    = i18n::t("settings.about.source");
             g.subtitle = "github.com/BernardoGiordano/Checkpoint";
             mRows.push_back(std::move(g));
 
             Row f;
-            f.section  = "CREDITS";
+            f.section  = i18n::t("settings.section.credits");
             f.title    = "Space Mono";
             f.subtitle = "SIL Open Font License 1.1";
             mRows.push_back(std::move(f));
@@ -569,9 +602,10 @@ void SettingsScreen::drawLogs(void) const
     Shapes::cardRound(ROW_X, paneY, ROW_W, paneH, 0, COLOR_SURFACE, COLOR_STROKE1, 1);
 
     if (mLogLines.empty()) {
+        const std::string msg = i18n::t("settings.logs.empty");
         u32 tw, th;
-        Gfx::GetTextDimensions(13, "No logs yet.", &tw, &th);
-        Gfx::DrawText(13, ROW_X + (ROW_W - (int)tw) / 2, paneY + (paneH - (int)th) / 2, COLOR_TEXT3, "No logs yet.");
+        Gfx::GetTextDimensions(13, msg.c_str(), &tw, &th);
+        Gfx::DrawText(13, ROW_X + (ROW_W - (int)tw) / 2, paneY + (paneH - (int)th) / 2, COLOR_TEXT3, msg.c_str());
         return;
     }
 
@@ -604,13 +638,14 @@ void SettingsScreen::draw(void) const
     // ---- Top bar ----
     UiKit::drawHintCircle(24, (TOPBAR_H - 20) / 2, "B");
     {
+        const std::string title = i18n::t("settings.title");
         u32 tw, th;
-        Gfx::GetTextDimensions(20, "Settings", &tw, &th);
-        Gfx::DrawText(20, 24 + 20 + 14, (TOPBAR_H - (int)th) / 2, COLOR_TEXT, "Settings");
+        Gfx::GetTextDimensions(20, title.c_str(), &tw, &th);
+        Gfx::DrawText(20, 24 + 20 + 14, (TOPBAR_H - (int)th) / 2, COLOR_TEXT, title.c_str());
     }
     {
         // Live config-path label, flashing to `success` briefly on a write.
-        std::string path = "saved to sdmc:" + Configuration::getInstance().BASEPATH;
+        std::string path = i18n::t("settings.saved_to") + " sdmc:" + Configuration::getInstance().BASEPATH;
         Color c          = mFlashTimer > 0 ? COLOR_SUCCESS : COLOR_TEXT3;
         u32 tw, th;
         Gfx::GetTextDimensions(12, path.c_str(), &tw, &th);
@@ -628,10 +663,11 @@ void SettingsScreen::draw(void) const
         if (active) {
             Shapes::fillRound(CAT_X, y, CAT_W, CAT_ITEM_H, 0, COLOR_ACCENT);
         }
-        Color fg = active ? COLOR_WHITE : COLOR_TEXT2;
+        Color fg                = active ? COLOR_WHITE : COLOR_TEXT2;
+        const std::string label = i18n::t(kCategoryKeys[i]);
         u32 lw, lh;
-        Gfx::GetTextDimensions(15, kCategoryLabels[i], &lw, &lh);
-        Gfx::DrawText(15, CAT_X + 16, y + (CAT_ITEM_H - (int)lh) / 2, fg, kCategoryLabels[i]);
+        Gfx::GetTextDimensions(15, label.c_str(), &lw, &lh);
+        Gfx::DrawText(15, CAT_X + 16, y + (CAT_ITEM_H - (int)lh) / 2, fg, label.c_str());
     }
     // Breathing selector on the rail while it owns the cursor.
     if (mCatFocused) {
@@ -770,20 +806,20 @@ void SettingsScreen::draw(void) const
     // ---- Hint bar ----
     if (mCatFocused) {
         UiKit::drawHintBar({
-            {"A", "Open"},
-            {"B", "Back"},
+            {"A", i18n::t("hint.open")},
+            {"B", i18n::t("hint.back")},
         });
     }
     else if (mCategory == Category::Logs) {
         UiKit::drawHintBar({
-            {"", "Scroll"},
-            {"B", "Categories"},
+            {"", i18n::t("hint.scroll")},
+            {"B", i18n::t("hint.categories")},
         });
     }
     else {
         UiKit::drawHintBar({
-            {"A", "Change"},
-            {"B", "Categories"},
+            {"A", i18n::t("hint.change")},
+            {"B", i18n::t("hint.categories")},
         });
     }
 }

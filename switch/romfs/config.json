@@ -15,6 +15,7 @@
   "confirm-restore": true,
   "quick-backup": false,
   "theme": "dark",
+  "language": "en",
   "sort-mode": "alpha",
   "version": 5
 }

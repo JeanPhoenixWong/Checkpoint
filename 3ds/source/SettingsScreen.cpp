@@ -31,6 +31,7 @@
 #include "ftpserver.hpp"
 #include "glyphs.hpp"
 #include "gui.hpp"
+#include "i18n.hpp"
 #include "loader.hpp"
 #include "main.hpp"
 #include "server.hpp"
@@ -45,40 +46,50 @@ enum SectionId { SEC_GENERAL = 0, SEC_LIBRARY, SEC_FOLDERS, SEC_NETWORK, SEC_ABO
 
 namespace {
     struct Section {
-        const char* letter; // section chip glyph (font-safe single character)
-        const char* name;
-        const char* blurb;
+        const char* letter;   // section chip glyph (font-safe single character)
+        const char* nameKey;  // i18n key, resolved at draw time
+        const char* blurbKey; // i18n key, resolved at draw time
     };
 
-    // Order matches the redesign mockup's section rail.
+    // Order matches the redesign mockup's section rail. Text held as i18n keys,
+    // never as localized strings, so a language change is seen live at draw time.
     const Section SECTIONS[] = {
-        {"G", "General",
-            "Cartridge scan, system saves, Wi-Fi transfer and restore confirmation. Changes write straight to config.json on your SD card."},
-        {"L", "Library", "Favorites and hidden titles - the filter and favorites lists."},
-        {"F", "Folders", "Per-title extra save and extdata folders on your SD card."},
-        {"N", "Network", "FTP server, Wi-Fi transfer status and this console's network addresses."},
-        {"i", "About", "Version, credits and storage usage."},
+        {"G", "settings.general.title", "settings.general.blurb"},
+        {"L", "settings.library.title", "settings.library.blurb"},
+        {"F", "settings.folders.title", "settings.folders.blurb"},
+        {"N", "settings.network.title", "settings.network.blurb"},
+        {"i", "settings.about.title", "settings.about.blurb"},
     };
     constexpr size_t SECTION_COUNT = sizeof(SECTIONS) / sizeof(SECTIONS[0]);
 
     struct ToggleRow {
-        const char* name;
-        const char* sub;
+        const char* nameKey;
+        const char* subKey;
     };
 
     // General section rows, in draw order. Row index maps 1:1 to the mutators
     // used in update(): 0 light theme, 1 scan_cart, 2 nand_saves,
     // 3 dsiware_saves, 4 transfer_enabled, 5 confirm_restore, 6 quick_backup.
     const ToggleRow GENERAL_ROWS[] = {
-        {"Light theme", "Use the light color palette"},
-        {"Scan game cartridge", "Detect the inserted cart on launch"},
-        {"Show system (NAND) saves", "Include system titles"},
-        {"Show DSiWare saves", "Include DSiWare titles from NAND"},
-        {"Enable Wi-Fi transfer", "Send / receive backups over network"},
-        {"Confirm before restore", "Ask before overwriting a save"},
-        {"Skip backup name prompt", "Use the timestamp, no keyboard"},
+        {"settings.general.light_theme", "settings.general.light_theme.sub"},
+        {"settings.general.scan_cart", "settings.general.scan_cart.sub"},
+        {"settings.general.nand_saves", "settings.general.nand_saves.sub"},
+        {"settings.general.dsiware_saves", "settings.general.dsiware_saves.sub"},
+        {"settings.general.transfer", "settings.general.transfer.sub"},
+        {"settings.general.confirm_restore", "settings.general.confirm_restore.sub"},
+        {"settings.general.quick_backup", "settings.general.quick_backup.sub"},
     };
     constexpr size_t GENERAL_COUNT = sizeof(GENERAL_ROWS) / sizeof(GENERAL_ROWS[0]);
+    // Extra General row after the toggles: a language cycler (en <-> it). Kept
+    // out of the toggle arrays since it has a value, not an on/off state.
+    constexpr size_t GENERAL_ROW_TOTAL = GENERAL_COUNT + 1;
+    constexpr int LANGUAGE_ROW         = (int)GENERAL_COUNT;
+
+    // Display name for a language code, in its own language (never localized).
+    const char* languageName(const std::string& code)
+    {
+        return code == "it" ? "Italiano" : "English";
+    }
 
     constexpr int SAVED_FLASH_FRAMES = 90;
 
@@ -136,7 +147,7 @@ size_t SettingsScreen::contentRowCount(size_t section) const
 {
     switch (section) {
         case SEC_GENERAL:
-            return GENERAL_COUNT;
+            return GENERAL_ROW_TOTAL;
         case SEC_LIBRARY:
             return mLibraryRows.size();
         case SEC_FOLDERS:
@@ -170,7 +181,7 @@ void SettingsScreen::drawScrollbar(int totalRows) const
     C2D_DrawRectSolid(trackX, thumbY, 0.5f, 3, thumbH, COLOR_ACCENT);
 }
 
-void SettingsScreen::drawToggleRow(int y, const char* name, const char* sub, bool on, bool focused) const
+void SettingsScreen::drawToggleRow(int y, const std::string& name, const std::string& sub, bool on, bool focused) const
 {
     const int rowH = 32;
     if (focused) {
@@ -190,6 +201,21 @@ void SettingsScreen::drawToggleRow(int y, const char* name, const char* sub, boo
     C2D_DrawRectSolid(knobX, ty + kpad, 0.6f, knob, th - 2 * kpad, on ? COLOR_WHITE : COLOR_MUTED);
 }
 
+void SettingsScreen::drawValueRow(int y, const std::string& name, const std::string& sub, const std::string& value, bool focused) const
+{
+    const int rowH = 32;
+    if (focused) {
+        C2D_DrawRectSolid(6, y, 0.5f, 308, rowH, C2D_Color32(122, 66, 196, 40));
+        Gui::drawOutline(6, y, 308, rowH, 1, COLOR_ACCENT);
+    }
+    TextPool::get().draw(name, 14, y + 4, 0.44f, COLOR_TEXT);
+    TextPool::get().draw(sub, 14, y + 18, 0.36f, COLOR_FAINT);
+
+    // Right-aligned value in the accent color, matching the toggle's right edge.
+    const float vw = TextPool::get().width(value, 0.44f);
+    TextPool::get().draw(value, 320 - 14 - vw, y + (rowH - 0.44f * fontGetInfo(NULL)->lineFeed) / 2, 0.44f, COLOR_ACCENT);
+}
+
 void SettingsScreen::drawListRow(int y, const std::string& primary, const std::string& secondary, u32 pipColor, bool focused, bool removable) const
 {
     const int rowH = 32;
@@ -207,7 +233,7 @@ void SettingsScreen::drawListRow(int y, const std::string& primary, const std::s
     }
 }
 
-void SettingsScreen::drawEmptyState(const char* title, const char* body) const
+void SettingsScreen::drawEmptyState(const std::string& title, const std::string& body) const
 {
     C2D_DrawRectSolid(140, 74, 0.5f, 40, 40, COLOR_CARD);
     Gui::drawOutline(140, 74, 40, 40, 1, COLOR_LINE);
@@ -232,7 +258,7 @@ void SettingsScreen::drawTop(void) const
     C2D_PlainImageTint(&brandTint, Configuration::getInstance().theme() == "light" ? COLOR_BLUE : COLOR_TEAL, 1.0f);
     C2D_DrawImageAt(flag, 6, 3, 0.5f, &brandTint, 1.0f, 1.0f);
     float nameX = 6 + ceilf(flag.subtex->width * 1.0f) + 6;
-    TextPool::get().draw("Settings", nameX, 4, 0.5f, COLOR_TEXT);
+    TextPool::get().draw(i18n::t("settings.title"), nameX, 4, 0.5f, COLOR_TEXT);
     {
         std::string right = "config.json";
         float w           = TextPool::get().width(right, 0.42f);
@@ -258,27 +284,27 @@ void SettingsScreen::drawTop(void) const
         }
         // Name is vertically centered against the chip square rather than top-aligned.
         const float ny = chipY + (chipSz - 0.44f * lineFeed) / 2;
-        TextPool::get().draw(SECTIONS[i].name, 42, ny, 0.44f, isSel ? COLOR_TEXT : COLOR_MUTED);
+        TextPool::get().draw(i18n::t(SECTIONS[i].nameKey), 42, ny, 0.44f, isSel ? COLOR_TEXT : COLOR_MUTED);
     }
 
     // Blurb card.
     C2D_DrawRectSolid(166, 34, 0.5f, 226, 160, COLOR_CARD);
     Gui::drawOutline(166, 34, 226, 160, 1, COLOR_LINE);
-    TextPool::get().draw(SECTIONS[sel].name, 178, 44, 0.5f, COLOR_TEXT);
-    TextPool::get().drawWrapped(SECTIONS[sel].blurb, 178, 66, 0.44f, COLOR_MUTED, 202);
+    TextPool::get().draw(i18n::t(SECTIONS[sel].nameKey), 178, 44, 0.5f, COLOR_TEXT);
+    TextPool::get().drawWrapped(i18n::t(SECTIONS[sel].blurbKey), 178, 66, 0.44f, COLOR_MUTED, 202);
 
     // Footer.
     C2D_DrawRectSolid(0, 220, 0.5f, 400, 20, COLOR_SURFACE);
     C2D_DrawRectSolid(0, 219, 0.5f, 400, 1, COLOR_LINE);
     if (contentFocus) {
-        drawHints(400, 223, std::string(GLYPH_B) + " Back to sections");
+        drawHints(400, 223, std::string(GLYPH_B) + " " + i18n::t("settings.hint.back_sections"));
     }
     else {
-        std::string hints = std::string(GLYPH_DPAD) + " Section     ";
+        std::string hints = std::string(GLYPH_DPAD) + " " + i18n::t("settings.hint.section") + "     ";
         if (sectionInteractive(sel)) {
-            hints += std::string(GLYPH_A) + " Edit     ";
+            hints += std::string(GLYPH_A) + " " + i18n::t("hint.edit") + "     ";
         }
-        hints += std::string(GLYPH_B) + " Back";
+        hints += std::string(GLYPH_B) + " " + i18n::t("hint.back");
         drawHints(400, 223, hints);
     }
 }
@@ -290,17 +316,26 @@ void SettingsScreen::drawGeneral(void) const
         cfg.confirmRestore(), cfg.quickBackup()};
     // Windowed like the Library/Folders lists: more rows than fit scroll under a
     // right-edge scrollbar. Stride 34 matches drawScrollbar's track geometry.
-    for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_COUNT; i++) {
+    for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_ROW_TOTAL; i++) {
         const int idx  = contentOffset + i;
         const int rowY = 30 + i * 34;
-        drawToggleRow(rowY, GENERAL_ROWS[idx].name, GENERAL_ROWS[idx].sub, vals[idx], contentFocus && contentCursor == idx);
+        if (idx == LANGUAGE_ROW) {
+            drawValueRow(rowY, i18n::t("settings.general.language"), i18n::t("settings.general.language.sub"), languageName(i18n::language()),
+                contentFocus && contentCursor == idx);
+        }
+        else {
+            drawToggleRow(
+                rowY, i18n::t(GENERAL_ROWS[idx].nameKey), i18n::t(GENERAL_ROWS[idx].subKey), vals[idx], contentFocus && contentCursor == idx);
+        }
     }
-    drawScrollbar((int)GENERAL_COUNT);
+    drawScrollbar((int)GENERAL_ROW_TOTAL);
     if (contentFocus) {
-        drawHints(320, 223, std::string(GLYPH_DPAD) + " Move     " + GLYPH_A + " Toggle     " + GLYPH_B + " Back");
+        drawHints(320, 223,
+            std::string(GLYPH_DPAD) + " " + i18n::t("hint.move") + "     " + GLYPH_A + " " + i18n::t("hint.toggle") + "     " + GLYPH_B + " " +
+                i18n::t("hint.back"));
     }
     else {
-        drawHints(320, 223, std::string(GLYPH_A) + " Edit");
+        drawHints(320, 223, std::string(GLYPH_A) + " " + i18n::t("hint.edit"));
     }
 }
 
@@ -308,7 +343,7 @@ void SettingsScreen::drawFolders(void) const
 {
     const std::vector<Row>& rows = mFolderRows;
     if (rows.empty()) {
-        drawEmptyState("No extra folders", "Add a per-title save or extdata folder on your SD card.");
+        drawEmptyState(i18n::t("settings.folders.empty.title"), i18n::t("settings.folders.empty.body"));
     }
     else {
         for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)rows.size(); i++) {
@@ -319,13 +354,17 @@ void SettingsScreen::drawFolders(void) const
         drawScrollbar((int)rows.size());
     }
     if (!contentFocus) {
-        drawHints(320, 223, std::string(GLYPH_A) + " Edit");
+        drawHints(320, 223, std::string(GLYPH_A) + " " + i18n::t("hint.edit"));
     }
     else if (rows.empty()) {
-        drawHints(320, 223, std::string(GLYPH_A) + " +Save     " + GLYPH_Y + " +Extdata     " + GLYPH_B + " Back");
+        drawHints(320, 223,
+            std::string(GLYPH_A) + " " + i18n::t("hint.add_save") + "     " + GLYPH_Y + " " + i18n::t("hint.add_extdata") + "     " + GLYPH_B + " " +
+                i18n::t("hint.back"));
     }
     else {
-        drawHints(320, 223, std::string(GLYPH_A) + " +Save   " + GLYPH_Y + " +Extdata   " + GLYPH_X + " Remove   " + GLYPH_B + " Back");
+        drawHints(320, 223,
+            std::string(GLYPH_A) + " " + i18n::t("hint.add_save") + "   " + GLYPH_Y + " " + i18n::t("hint.add_extdata") + "   " + GLYPH_X + " " +
+                i18n::t("hint.remove") + "   " + GLYPH_B + " " + i18n::t("hint.back"));
     }
 }
 
@@ -333,7 +372,7 @@ void SettingsScreen::drawLibrary(void) const
 {
     const std::vector<Row>& rows = mLibraryRows;
     if (rows.empty()) {
-        drawEmptyState("No favorites or hidden titles", "Favorite a title or hide it from the library grid.");
+        drawEmptyState(i18n::t("settings.library.empty.title"), i18n::t("settings.library.empty.body"));
     }
     else {
         for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)rows.size(); i++) {
@@ -344,13 +383,17 @@ void SettingsScreen::drawLibrary(void) const
         drawScrollbar((int)rows.size());
     }
     if (!contentFocus) {
-        drawHints(320, 223, std::string(GLYPH_A) + " Edit");
+        drawHints(320, 223, std::string(GLYPH_A) + " " + i18n::t("hint.edit"));
     }
     else if (rows.empty()) {
-        drawHints(320, 223, std::string(GLYPH_A) + " +Favorite     " + GLYPH_Y + " +Hide     " + GLYPH_B + " Back");
+        drawHints(320, 223,
+            std::string(GLYPH_A) + " " + i18n::t("hint.add_favorite") + "     " + GLYPH_Y + " " + i18n::t("hint.hide") + "     " + GLYPH_B + " " +
+                i18n::t("hint.back"));
     }
     else {
-        drawHints(320, 223, std::string(GLYPH_A) + " +Fav   " + GLYPH_Y + " +Hide   " + GLYPH_X + " Remove   " + GLYPH_B + " Back");
+        drawHints(320, 223,
+            std::string(GLYPH_A) + " " + i18n::t("hint.add_fav") + "   " + GLYPH_Y + " " + i18n::t("hint.hide") + "   " + GLYPH_X + " " +
+                i18n::t("hint.remove") + "   " + GLYPH_B + " " + i18n::t("hint.back"));
     }
 }
 
@@ -360,31 +403,35 @@ void SettingsScreen::drawNetwork(void) const
 
     // Row 0: the interactive FTP-server toggle.
     const bool ftpOn = cfg.isFTPEnabled();
-    drawToggleRow(26, "FTP server", "Serve the SD card over FTP (port 50000)", ftpOn, contentFocus && contentCursor == 0);
+    drawToggleRow(26, i18n::t("settings.network.ftp"), i18n::t("settings.network.ftp.sub"), ftpOn, contentFocus && contentCursor == 0);
 
     int y      = 68;
-    auto field = [&](const char* label, const std::string& value, u32 valColor) {
+    auto field = [&](const std::string& label, const std::string& value, u32 valColor) {
         TextPool::get().draw(label, 20, y, 0.4f, COLOR_FAINT);
         TextPool::get().draw(value, 20, y + 14, 0.46f, valColor);
         y += 38;
     };
 
     std::string ftpAddress = FTPServer::getAddress();
-    field("FTP address", ftpOn ? (ftpAddress.empty() ? "Unavailable" : ftpAddress) : "Disabled",
+    field(i18n::t("settings.network.ftp_address"),
+        ftpOn ? (ftpAddress.empty() ? i18n::t("common.unavailable") : ftpAddress) : i18n::t("common.disabled"),
         ftpOn && !ftpAddress.empty() ? COLOR_TEAL : COLOR_MUTED);
 
     const bool transferOn = cfg.transferEnabled();
-    field("Wi-Fi transfer", transferOn ? "Enabled" : "Disabled", transferOn ? COLOR_TEAL : COLOR_MUTED);
+    field(i18n::t("settings.network.transfer"), transferOn ? i18n::t("common.enabled") : i18n::t("common.disabled"),
+        transferOn ? COLOR_TEAL : COLOR_MUTED);
 
     std::string address = Server::getAddress();
-    field("In memory logs", address.empty() ? "Unavailable" : address + "/logs/memory", address.empty() ? COLOR_MUTED : COLOR_TEXT);
-    field("Complete logs", address.empty() ? "Unavailable" : address + "/logs/file", address.empty() ? COLOR_MUTED : COLOR_TEXT);
+    field(i18n::t("settings.network.memory_logs"), address.empty() ? i18n::t("common.unavailable") : address + "/logs/memory",
+        address.empty() ? COLOR_MUTED : COLOR_TEXT);
+    field(i18n::t("settings.network.file_logs"), address.empty() ? i18n::t("common.unavailable") : address + "/logs/file",
+        address.empty() ? COLOR_MUTED : COLOR_TEXT);
 
     if (contentFocus) {
-        drawHints(320, 223, std::string(GLYPH_A) + " Toggle     " + GLYPH_B + " Back");
+        drawHints(320, 223, std::string(GLYPH_A) + " " + i18n::t("hint.toggle") + "     " + GLYPH_B + " " + i18n::t("hint.back"));
     }
     else {
-        drawHints(320, 223, std::string(GLYPH_A) + " Edit");
+        drawHints(320, 223, std::string(GLYPH_A) + " " + i18n::t("hint.edit"));
     }
 }
 
@@ -400,24 +447,24 @@ void SettingsScreen::drawAbout(void) const
     TextPool::get().draw(ver, x, 54, 0.42f, COLOR_FAINT);
 
     int y     = 82;
-    auto line = [&](const char* label, const std::string& value) {
+    auto line = [&](const std::string& label, const std::string& value) {
         TextPool::get().draw(label, 20, y, 0.4f, COLOR_FAINT);
         float lw = TextPool::get().width(value, 0.42f);
         TextPool::get().draw(value, 300 - lw, y, 0.42f, COLOR_TEXT);
         y += 24;
     };
-    line("Author", "Bernardo Giordano");
-    line("License", "GPLv3");
+    line(i18n::t("settings.about.author"), "Bernardo Giordano");
+    line(i18n::t("settings.about.license"), "GPLv3");
 
     struct statvfs st;
     if (statvfs("sdmc:/", &st) == 0 && st.f_blocks > 0) {
         u64 total = (u64)st.f_blocks * st.f_frsize;
         u64 avail = (u64)st.f_bavail * st.f_frsize;
         u64 used  = total > avail ? total - avail : 0;
-        line("SD card", StringUtils::humanBytes(used) + " used of " + StringUtils::humanBytes(total));
+        line(i18n::t("settings.about.sd_card"), i18n::t("settings.about.sd_usage", {StringUtils::humanBytes(used), StringUtils::humanBytes(total)}));
     }
 
-    drawHints(320, 223, std::string(GLYPH_B) + " Back");
+    drawHints(320, 223, std::string(GLYPH_B) + " " + i18n::t("hint.back"));
 }
 
 void SettingsScreen::drawBottom(void) const
@@ -429,9 +476,9 @@ void SettingsScreen::drawBottom(void) const
     // Header.
     C2D_DrawRectSolid(0, 0, 0.5f, 320, 24, COLOR_SURFACE);
     C2D_DrawRectSolid(0, 24, 0.5f, 320, 1, COLOR_LINE);
-    TextPool::get().draw(SECTIONS[sel].name, 10, 4, 0.5f, COLOR_TEXT);
+    TextPool::get().draw(i18n::t(SECTIONS[sel].nameKey), 10, 4, 0.5f, COLOR_TEXT);
     if (sectionInteractive(sel) && savedTimer > 0) {
-        std::string saved = "\xE2\x97\x8F Saved"; // "● Saved"
+        std::string saved = "\xE2\x97\x8F " + i18n::t("common.saved"); // "● Saved"
         float w           = TextPool::get().width(saved, 0.4f);
         TextPool::get().draw(saved, 320 - 10 - w, 6, 0.4f, COLOR_TEAL);
     }
@@ -463,6 +510,17 @@ void SettingsScreen::drawBottom(void) const
 void SettingsScreen::toggleGeneral(int idx)
 {
     Configuration& cfg = Configuration::getInstance();
+    if (idx == LANGUAGE_ROW) {
+        // Cycle en -> it -> en. Persist to config and switch live; every t()
+        // call from the next frame resolves against the new language.
+        const std::string next = i18n::language() == "en" ? "it" : "en";
+        cfg.setLanguage(next);
+        i18n::setLanguage(next);
+        // The content-keyed TextPool cache needs no flush: new-language strings
+        // are cache misses that re-parse lazily; stale entries age out on rebuild.
+        savedTimer = SAVED_FLASH_FRAMES;
+        return;
+    }
     switch (idx) {
         case 0:
             cfg.setTheme(cfg.theme() == "light" ? "dark" : "light");
@@ -501,7 +559,7 @@ void SettingsScreen::update(const InputState& input)
 
     // Touch toggles a General row directly, from either focus state.
     if (sel == SEC_GENERAL && (kDown & KEY_TOUCH)) {
-        for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_COUNT; i++) {
+        for (int i = 0; i < VISIBLE_ROWS && contentOffset + i < (int)GENERAL_ROW_TOTAL; i++) {
             const int idx  = contentOffset + i;
             const int rowY = 30 + i * 34;
             if (input.py >= rowY && input.py < rowY + 32 && input.px >= 6 && input.px < 314) {

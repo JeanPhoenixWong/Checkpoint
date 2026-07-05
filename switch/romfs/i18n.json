@@ -1,0 +1,72 @@
+{
+  "settings.title":                       { "en": "Settings", "it": "Impostazioni" },
+  "settings.saved_to":                    { "en": "saved to", "it": "salvato in" },
+
+  "settings.cat.general":                 { "en": "General", "it": "Generale" },
+  "settings.cat.library":                 { "en": "Library", "it": "Libreria" },
+  "settings.cat.save_folders":            { "en": "Save folders", "it": "Cartelle salvataggi" },
+  "settings.cat.connectivity":            { "en": "Connectivity", "it": "Connettività" },
+  "settings.cat.logs":                    { "en": "Logs", "it": "Log" },
+  "settings.cat.about":                   { "en": "About", "it": "Info" },
+
+  "settings.section.appearance":          { "en": "APPEARANCE", "it": "ASPETTO" },
+  "settings.section.safety":              { "en": "SAFETY", "it": "SICUREZZA" },
+  "settings.section.connectivity":        { "en": "CONNECTIVITY", "it": "CONNETTIVITÀ" },
+  "settings.section.logs":                { "en": "LOGS", "it": "LOG" },
+  "settings.section.favorites":           { "en": "FAVORITES", "it": "PREFERITI" },
+  "settings.section.hidden":              { "en": "HIDDEN TITLES", "it": "TITOLI NASCOSTI" },
+  "settings.section.user_folders":        { "en": "USER SAVE FOLDERS", "it": "CARTELLE SALVATAGGI UTENTE" },
+  "settings.section.device_folders":      { "en": "DEVICE SAVE FOLDERS", "it": "CARTELLE SALVATAGGI DISPOSITIVO" },
+  "settings.section.about":               { "en": "ABOUT", "it": "INFO" },
+  "settings.section.credits":             { "en": "CREDITS", "it": "CREDITI" },
+
+  "settings.general.theme":               { "en": "Theme", "it": "Tema" },
+  "settings.general.theme.sub":           { "en": "Applies immediately", "it": "Applicato subito" },
+  "settings.theme.dark":                  { "en": "Dark", "it": "Scuro" },
+  "settings.theme.light":                 { "en": "Light", "it": "Chiaro" },
+  "settings.general.language":            { "en": "Language", "it": "Lingua" },
+  "settings.general.language.sub":        { "en": "UI language", "it": "Lingua dell'interfaccia" },
+  "settings.general.sort":                { "en": "Default sort", "it": "Ordinamento predefinito" },
+  "settings.general.sort.sub":            { "en": "Order of the title grid at launch", "it": "Ordine della griglia dei titoli all'avvio" },
+  "settings.general.confirm_restore":     { "en": "Confirm before restore", "it": "Conferma prima di ripristinare" },
+  "settings.general.confirm_restore.sub": { "en": "Ask before overwriting a save on restore", "it": "Chiedi prima di sovrascrivere un salvataggio" },
+  "settings.general.quick_backup":        { "en": "Skip backup name prompt", "it": "Salta la richiesta del nome" },
+  "settings.general.quick_backup.sub":    { "en": "Use the timestamp, no keyboard", "it": "Usa la data e ora, senza tastiera" },
+
+  "settings.conn.ftp":                    { "en": "FTP server", "it": "Server FTP" },
+  "settings.conn.ftp.sub":                { "en": "Browse backups from a computer", "it": "Sfoglia i backup da un computer" },
+  "settings.conn.running":                { "en": "· running", "it": "· attivo" },
+  "settings.conn.running_on":             { "en": "· running on {0}:50000", "it": "· attivo su {0}:50000" },
+  "settings.conn.log_server":             { "en": "Log server", "it": "Server log" },
+  "settings.conn.full_log":               { "en": "Full log file", "it": "File di log completo" },
+
+  "settings.library.unfavorite":          { "en": "Unfavorite", "it": "Rimuovi preferito" },
+  "settings.library.add_favorite":        { "en": "Add a favorite", "it": "Aggiungi preferito" },
+  "settings.library.add_favorite.sub":    { "en": "Pin a title to the top of the grid", "it": "Fissa un titolo in cima alla griglia" },
+  "settings.library.unhide":              { "en": "Unhide", "it": "Mostra" },
+  "settings.library.hide_title":          { "en": "Hide a title", "it": "Nascondi un titolo" },
+  "settings.library.hide_title.sub":      { "en": "Remove a title from the grid", "it": "Rimuovi un titolo dalla griglia" },
+  "settings.pill.add":                    { "en": "+ Add", "it": "+ Aggiungi" },
+  "settings.pill.remove":                 { "en": "Remove", "it": "Rimuovi" },
+
+  "settings.folders.add_save":            { "en": "Add a save folder", "it": "Aggiungi cartella salvataggi" },
+  "settings.folders.add_save.sub":        { "en": "Pick a title, then an extra folder for its saves", "it": "Scegli un titolo, poi una cartella extra per i salvataggi" },
+  "settings.folders.add_device":          { "en": "Add a device save folder", "it": "Aggiungi cartella salvataggi dispositivo" },
+  "settings.folders.add_device.sub":      { "en": "Pick a title, then an extra folder for its device saves", "it": "Scegli un titolo, poi una cartella extra per i salvataggi del dispositivo" },
+  "settings.folders.choose_title":        { "en": "Choose a title", "it": "Scegli un titolo" },
+  "settings.folders.choose_folder":       { "en": "Choose a save folder", "it": "Scegli una cartella salvataggi" },
+
+  "settings.about.version":               { "en": "Version", "it": "Versione" },
+  "settings.about.author":                { "en": "Author", "it": "Autore" },
+  "settings.about.source":                { "en": "Source", "it": "Sorgente" },
+
+  "settings.logs.empty":                  { "en": "No logs yet.", "it": "Nessun log." },
+
+  "hint.open":                            { "en": "Open", "it": "Apri" },
+  "hint.back":                            { "en": "Back", "it": "Indietro" },
+  "hint.scroll":                          { "en": "Scroll", "it": "Scorri" },
+  "hint.categories":                      { "en": "Categories", "it": "Categorie" },
+  "hint.change":                          { "en": "Change", "it": "Modifica" },
+
+  "common.unavailable":                   { "en": "Unavailable", "it": "Non disponibile" }
+}

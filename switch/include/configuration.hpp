@@ -95,6 +95,10 @@ public:
     std::string theme(void);
     void setTheme(const std::string& theme);
 
+    // "en" (default) or "it". Selects the UI language; see i18n::setLanguage.
+    std::string language(void);
+    void setLanguage(const std::string& language);
+
     // Default/current title-grid sort mode. Persisted so it survives a
     // relaunch; the grid's X-button cycle and the Settings "Default sort"
     // spinner both read/write this same setting through TitleCatalog.
@@ -124,6 +128,7 @@ private:
     std::unordered_set<u64> mFilterIds, mFavoriteIds;
     std::unordered_map<u64, std::vector<std::string>> mAdditionalSaveFolders, mAdditionalDeviceSaveFolders;
     std::string mTheme;
+    std::string mLanguage;
     sort_t mSortMode;
 };
 
