@@ -27,6 +27,7 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -39,6 +40,19 @@ namespace Server {
 
     using HttpHandler = std::function<HttpResponse(const std::string& path, const std::string& requestData)>;
 
+    // A streamed upload: for a registered upload path the server writes the raw
+    // request body to a temp file (instead of buffering it in RAM), so an upload
+    // far larger than MAX_REQUEST_SIZE is handled without heap pressure. The
+    // handler is handed the header block plus the body temp-file path and its
+    // length; the server deletes the temp file once the handler returns.
+    struct UploadRequest {
+        std::string headers;  // request line + header block, without the trailing CRLFCRLF
+        std::string bodyPath; // temp file holding the raw request body (SD-relative, e.g. /3ds/...)
+        uint64_t bodyLength;  // declared Content-Length (bytes streamed to bodyPath)
+    };
+
+    using UploadHandler = std::function<HttpResponse(const UploadRequest&)>;
+
     void init(void);
     void exit(void);
     // Signals the network loop to stop (it exits within one iteration) without
@@ -50,6 +64,11 @@ namespace Server {
 
     void registerHandler(const std::string& path, HttpHandler handler);
     void unregisterHandler(const std::string& path);
+
+    // Registers a streaming upload handler for `path`; the body is written to
+    // `tmpPath` (SD-relative) before the handler runs. Unregistered via
+    // unregisterHandler.
+    void registerUploadHandler(const std::string& path, const std::string& tmpPath, UploadHandler handler);
 }
 
 #endif
