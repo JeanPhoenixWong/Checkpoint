@@ -69,6 +69,17 @@ protected:
     void refreshTitlesFull(void);
     std::string nameFromCell(size_t index) const;
     void startTransferSend(void);
+    // Starts the wireless receiver and opens its overlay (or an error overlay).
+    void startTransferReceive(void);
+    // Visual rows in directoryList: 0 = "New backup", 1 = "Receive" (only while
+    // the transfer feature is enabled), then the existing backups. Logical backup
+    // cells (BackupTarget::fullPath indexing: 0 = new, >= 1 = existing) don't know
+    // about the Receive row, so these helpers translate between the two spaces.
+    // They follow selected.transferRow (what the rows on screen were built with),
+    // not the live setting, so input always maps to what the user sees.
+    bool isReceiveRow(size_t row) const;
+    size_t rowToCell(size_t row) const; // invalid for the Receive row; check isReceiveRow first
+    size_t cellToRow(size_t cell) const;
     // Rebuilds the SelectedTitle snapshot (and the grid favorite pips) when the
     // selection, backup kind, catalog generation, or size-cache generation moved
     // since the last frame; no-op otherwise. Also rebuilds directoryList's rows.
@@ -82,8 +93,9 @@ protected:
 
 private:
     Hid<HidDirection::HORIZONTAL, HidDirection::VERTICAL> hid;
-    std::unique_ptr<Clickable> buttonBackup, buttonRestore, buttonPlayCoins, buttonTransfer;
+    std::unique_ptr<Clickable> buttonBackup, buttonRestore, buttonPlayCoins;
     std::unique_ptr<Clickable> buttonBackupAL, buttonRestoreAL; // narrower Backup/Restore laid out alongside Coins on Activity Log
+    std::unique_ptr<Clickable> buttonSend;                      // middle of the Backup/Send/Restore trio shown on a highlighted backup
     std::unique_ptr<Clickable> buttonBackupAll;                 // full-width batch Backup shown in multi-select, replacing the two action buttons
     std::unique_ptr<BackupList> directoryList;
     std::string ver;
@@ -113,7 +125,8 @@ private:
         std::string mediaType;
         bool favorite      = false;
         bool activityLog   = false;
-        size_t backupCount = 0;       // existing backups (entry 0 "New..." excluded)
+        bool transferRow   = false;   // rows were built with the "Receive" row at index 1
+        size_t backupCount = 0;       // existing backups (action rows excluded)
         std::optional<u64> totalSize; // async total; nullopt while computing
     };
     SelectedTitle selected;

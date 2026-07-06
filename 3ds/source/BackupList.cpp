@@ -98,15 +98,17 @@ void BackupList::draw(bool focused) const
 
         const int textY = rowY + (mRowH - 13) / 2;
 
-        // Leading marker: a solid teal tile with a dark "+" for "New backup"
-        // (high contrast in every row state), a small dot otherwise.
-        if (r.isNew) {
+        // Leading marker: a solid teal tile with a dark glyph for the action rows
+        // ("+" for New backup, "↓" for Receive — high contrast in every row
+        // state), a small dot otherwise.
+        if (r.kind != RowKind::Existing) {
             const int tileSz = 14, tileX = mx + 6, tileY = rowY + (mRowH - tileSz) / 2;
             C2D_DrawRectSolid(tileX, tileY, 0.5f, tileSz, tileSz, COLOR_TEAL);
-            // Teal stays light in both themes, so a black "+" holds contrast either way.
-            const float pw = text.width("+", 0.5f);
-            const float lf = fontGetInfo(NULL)->lineFeed;
-            text.draw("+", tileX + (tileSz - pw) / 2, tileY - 2 + (tileSz - 0.5f * lf) / 2, 0.5f, COLOR_BLACK);
+            // Teal stays light in both themes, so a black glyph holds contrast either way.
+            const char* glyph = r.kind == RowKind::New ? "+" : "↓";
+            const float pw    = text.width(glyph, 0.5f);
+            const float lf    = fontGetInfo(NULL)->lineFeed;
+            text.draw(glyph, tileX + (tileSz - pw) / 2, tileY - 2 + (tileSz - 0.5f * lf) / 2, 0.5f, COLOR_BLACK);
         }
         else {
             C2D_DrawRectSolid(mx + 9, rowY + mRowH / 2 - 2, 0.5f, 4, 4, sel ? COLOR_RING : COLOR_FAINT);
@@ -114,7 +116,7 @@ void BackupList::draw(bool focused) const
 
         // Name (left) — near-white so it stays legible on the card and on the
         // purple selection fill alike; muted only for unselected existing rows.
-        const u32 nameColor = (r.isNew || sel) ? COLOR_TEXT : COLOR_MUTED;
+        const u32 nameColor = (r.kind != RowKind::Existing || sel) ? COLOR_TEXT : COLOR_MUTED;
         text.draw(r.name, mx + 26, textY, 0.45f, nameColor);
 
         // Meta (right) — backup size, or the New-row caption.

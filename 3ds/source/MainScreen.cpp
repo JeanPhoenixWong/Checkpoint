@@ -113,15 +113,16 @@ MainScreen::MainScreen(void) : hid(rowlen * collen, collen)
     buttonRestoreAL = std::make_unique<Clickable>(216, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.restore_short"), true);
     // Full-width batch-backup button shown only while multi-selecting.
     buttonBackupAll = std::make_unique<Clickable>(8, 182, 304, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup_selected"), true);
-    buttonTransfer  = std::make_unique<Clickable>(4, 223, 96, 16, COLOR_RAISED, COLOR_MUTED, i18n::t("main.transfer"), true);
-    directoryList   = std::make_unique<BackupList>(12, 70, 296, 106, 5);
+    // Middle of the contextual Backup / Send / Restore trio (same 96px trio geometry as the Activity Log row).
+    buttonSend    = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("transfer.send"), true);
+    directoryList = std::make_unique<BackupList>(12, 70, 296, 106, 5);
     buttonBackup->canChangeColorWhenSelected(true);
     buttonBackupAll->canChangeColorWhenSelected(true);
     buttonRestore->canChangeColorWhenSelected(true);
     buttonPlayCoins->canChangeColorWhenSelected(true);
     buttonBackupAL->canChangeColorWhenSelected(true);
     buttonRestoreAL->canChangeColorWhenSelected(true);
-    buttonTransfer->canChangeColorWhenSelected(true);
+    buttonSend->canChangeColorWhenSelected(true);
 
     ver = StringUtils::versionString();
 
@@ -351,16 +352,22 @@ void MainScreen::drawBottom(void) const
             buttonPlayCoins->draw(0.6f, COLOR_ACCENT);
             buttonRestoreAL->draw(0.6f, COLOR_RING);
         }
+        // A highlighted existing backup (not an action row, not Activity Log) gets a
+        // Backup / Send / Restore trio so Send is a one-touch, contextual action.
+        else if (transferEnabled && g_bottomScrollEnabled && directoryList->index() > 0 && !isReceiveRow(directoryList->index())) {
+            buttonBackupAL->text(i18n::t("main.backup_short"));
+            buttonSend->text(i18n::t("transfer.send"));
+            buttonRestoreAL->text(i18n::t("main.restore_short"));
+            buttonBackupAL->draw(0.6f, COLOR_RING);
+            buttonSend->draw(0.6f, COLOR_ACCENT);
+            buttonRestoreAL->draw(0.6f, COLOR_RING);
+        }
         else {
             buttonBackup->text(i18n::t("main.backup") + " ");
             buttonRestore->text(i18n::t("main.restore") + " ");
             buttonBackup->draw(0.6f, COLOR_RING);
             buttonRestore->draw(0.6f, COLOR_RING);
         }
-    }
-
-    if (transferEnabled) {
-        buttonTransfer->draw(0.5f, COLOR_ACCENT);
     }
 
     // Subtle scrim while no title is opened: the top grid holds focus, so the
@@ -508,7 +515,7 @@ void MainScreen::refreshSelected(void)
     const size_t count   = (size_t)catalog.getTitleCount(backupKind);
 
     if (selected.valid == (count > 0) && selected.fullIndex == hid.fullIndex() && selected.kind == backupKind && selected.catalogGen == catalogGen &&
-        selected.sizeGen == sizeGen) {
+        selected.sizeGen == sizeGen && selected.transferRow == transferEnabled) {
         return; // snapshot still describes what is on screen
     }
 
@@ -519,11 +526,12 @@ void MainScreen::refreshSelected(void)
         }
     }
 
-    selected.valid      = count > 0;
-    selected.fullIndex  = hid.fullIndex();
-    selected.kind       = backupKind;
-    selected.catalogGen = catalogGen;
-    selected.sizeGen    = sizeGen;
+    selected.valid       = count > 0;
+    selected.fullIndex   = hid.fullIndex();
+    selected.kind        = backupKind;
+    selected.catalogGen  = catalogGen;
+    selected.sizeGen     = sizeGen;
+    selected.transferRow = transferEnabled;
 
     if (!selected.valid) {
         directoryList->clear();
@@ -543,18 +551,24 @@ void MainScreen::refreshSelected(void)
     selected.activityLog = title.isActivityLog();
     selected.totalSize   = BackupSizeCache::get().total(selected.id, backupKind);
 
-    // Rows: entry 0 is the "New backup" affordance, the rest are existing
-    // backups labelled with their (async) size.
+    // Rows: entry 0 is the "New backup" affordance, entry 1 the "Receive" action
+    // (while the transfer feature is enabled), the rest are existing backups
+    // labelled with their (async) size. rowToCell()/cellToRow() depend on this
+    // layout.
     std::vector<std::u16string> dirs = target.backups();
     directoryList->clear();
     for (size_t i = 0; i < dirs.size(); i++) {
         if (i == 0) {
             directoryList->push_back(i18n::t("main.new_backup"),
-                backupKind == BackupKind::Save ? i18n::t("main.from_current_save") : i18n::t("main.from_current_extdata"), true);
+                backupKind == BackupKind::Save ? i18n::t("main.from_current_save") : i18n::t("main.from_current_extdata"), BackupList::RowKind::New);
+            if (transferEnabled) {
+                directoryList->push_back(i18n::t("transfer.receive"), i18n::t("main.from_wireless"), BackupList::RowKind::Receive);
+            }
         }
         else {
             std::optional<u64> bs = BackupSizeCache::get().backupSize(target.fullPath(i));
-            directoryList->push_back(StringUtils::UTF16toUTF8(dirs.at(i)), bs.has_value() ? StringUtils::humanBytes(*bs) : std::string("…"), false);
+            directoryList->push_back(StringUtils::UTF16toUTF8(dirs.at(i)), bs.has_value() ? StringUtils::humanBytes(*bs) : std::string("…"),
+                BackupList::RowKind::Existing);
         }
     }
     selected.backupCount = dirs.empty() ? 0 : dirs.size() - 1; // entry 0 is "New..."
@@ -671,8 +685,11 @@ void MainScreen::handleEvents(const InputState& input)
                     },
                     [this]() { this->removeOverlay(); });
             }
+            else if (isReceiveRow(directoryList->index())) {
+                startTransferReceive();
+            }
             else {
-                requestRestore(directoryList->index());
+                requestRestore(rowToCell(directoryList->index()));
             }
         }
         else {
@@ -693,13 +710,13 @@ void MainScreen::handleEvents(const InputState& input)
     if (kDown & KEY_X) {
         if (g_bottomScrollEnabled) {
             size_t index = directoryList->index();
-            if (index > 0) {
+            if (index > 0 && !isReceiveRow(index)) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
                     *this, i18n::t("main.confirm_delete"),
                     [this, index]() {
                         Title title;
                         TitleCatalog::get().getTitle(title, hid.fullIndex(), backupKind);
-                        std::u16string path = title.backup(backupKind).fullPath(index);
+                        std::u16string path = title.backup(backupKind).fullPath(rowToCell(index));
                         io::deleteBackupFolder(path);
                         TitleCatalog::get().refreshDirectories(title.id());
                         directoryList->setIndex(index - 1);
@@ -753,26 +770,21 @@ void MainScreen::handleEvents(const InputState& input)
         refreshTitlesFull();
     }
 
-    if (transferEnabled && buttonTransfer->released()) {
-        currentOverlay = std::make_shared<TransferMenuOverlay>(
-            *this,
-            [this]() {
-                this->removeOverlay();
-                this->startTransferSend();
-            },
-            [this]() {
-                std::string error;
-                if (!Transfer::startReceiver(error)) {
-                    this->currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, error.empty() ? i18n::t("main.receiver_failed") : error);
-                    return;
-                }
-                this->currentOverlay = std::make_shared<ReceiveOverlay>(*this);
-            });
-    }
-
     // From the snapshot the current frame was drawn from, so input maps to the
     // buttons the user actually sees.
     const bool activityLog = selected.valid && selected.activityLog;
+    // A highlighted existing backup shows the Backup / Send / Restore trio; Send
+    // goes straight to startTransferSend() (which validates and prompts).
+    const bool sendContext = transferEnabled && selected.valid && !activityLog && g_bottomScrollEnabled && directoryList->index() > 0 &&
+                             !isReceiveRow(directoryList->index());
+    // Both the Activity Log and the send-context layouts use the narrow 96px
+    // Backup/Restore (buttonBackupAL/buttonRestoreAL) buttons.
+    const bool useTrio = activityLog || sendContext;
+
+    if (sendContext && buttonSend->released()) {
+        startTransferSend();
+        return;
+    }
 
     if (MS::multipleSelectionEnabled()) {
         // One large Backup button (touch or A) backs up the whole tagged batch;
@@ -789,22 +801,25 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
     else {
-        if ((activityLog ? buttonBackupAL : buttonBackup)->released() || (kDown & KEY_L)) {
+        if ((useTrio ? buttonBackupAL : buttonBackup)->released() || (kDown & KEY_L)) {
             if (g_bottomScrollEnabled) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
                     *this, i18n::t("main.confirm_backup_save"),
                     [this]() {
-                        this->doBackup(hid.fullIndex(), directoryList->index());
+                        // The Receive action row has no backup behind it; treat it
+                        // like the "New backup" row (cell 0) for a Backup press.
+                        const size_t row = directoryList->index();
+                        this->doBackup(hid.fullIndex(), isReceiveRow(row) ? 0 : rowToCell(row));
                         TransferJob::get().start();
                     },
                     [this]() { this->removeOverlay(); });
             }
         }
 
-        if ((activityLog ? buttonRestoreAL : buttonRestore)->released() || (kDown & KEY_R)) {
-            size_t cellIndex = directoryList->index();
-            if (g_bottomScrollEnabled && cellIndex > 0) {
-                requestRestore(cellIndex);
+        if ((useTrio ? buttonRestoreAL : buttonRestore)->released() || (kDown & KEY_R)) {
+            size_t row = directoryList->index();
+            if (g_bottomScrollEnabled && row > 0 && !isReceiveRow(row)) {
+                requestRestore(rowToCell(row));
             }
         }
     }
@@ -843,7 +858,35 @@ void MainScreen::updateButtons(void)
 
 std::string MainScreen::nameFromCell(size_t index) const
 {
-    return directoryList->name(index);
+    return directoryList->name(cellToRow(index));
+}
+
+bool MainScreen::isReceiveRow(size_t row) const
+{
+    return selected.transferRow && row == 1;
+}
+
+size_t MainScreen::rowToCell(size_t row) const
+{
+    return (selected.transferRow && row > 1) ? row - 1 : row;
+}
+
+size_t MainScreen::cellToRow(size_t cell) const
+{
+    return (selected.transferRow && cell > 0) ? cell + 1 : cell;
+}
+
+void MainScreen::startTransferReceive(void)
+{
+    // Receiver lifetime == overlay lifetime (B in the overlay stops it), so no
+    // background-receiver state is introduced here.
+    std::string error;
+    if (!Transfer::startReceiver(error)) {
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, error.empty() ? i18n::t("main.receiver_failed") : error);
+    }
+    else {
+        currentOverlay = std::make_shared<ReceiveOverlay>(*this);
+    }
 }
 
 void MainScreen::startTransferSend(void)
@@ -853,11 +896,12 @@ void MainScreen::startTransferSend(void)
         return;
     }
 
-    size_t cellIndex = directoryList->index();
-    if (!g_bottomScrollEnabled || cellIndex == 0) {
+    const size_t row = directoryList->index();
+    if (!g_bottomScrollEnabled || row == 0 || isReceiveRow(row)) {
         currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.select_backup_send"));
         return;
     }
+    size_t cellIndex = rowToCell(row);
 
     Title title;
     TitleCatalog::get().getTitle(title, hid.fullIndex(), backupKind);

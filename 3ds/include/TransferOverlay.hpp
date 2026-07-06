@@ -27,12 +27,7 @@
 #ifndef TRANSFEROVERLAY_HPP
 #define TRANSFEROVERLAY_HPP
 
-#include "ChoiceOverlay.hpp"
-
-class TransferMenuOverlay : public ChoiceOverlay {
-public:
-    TransferMenuOverlay(Screen& screen, const std::function<void()>& callbackSend, const std::function<void()>& callbackReceive);
-};
+#include "Overlay.hpp"
 
 class ReceiveOverlay : public Overlay {
 public:

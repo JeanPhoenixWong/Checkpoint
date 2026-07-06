@@ -829,16 +829,6 @@
     "nl": "Back-up {0} geselecteerd",
     "ja": "{0}個をバックアップ"
   },
-  "main.transfer": {
-    "en": "Transfer",
-    "it": "Trasferisci",
-    "es": "Transferir",
-    "fr": "Transférer",
-    "de": "Übertragen",
-    "pt": "Transferir",
-    "nl": "Overdracht",
-    "ja": "転送"
-  },
   "main.loading": {
     "en": "Loading titles... {0}%",
     "it": "Caricamento titoli... {0}%",
@@ -1018,6 +1008,16 @@
     "pt": "Do extdata atual",
     "nl": "Van huidige extdata",
     "ja": "現在の拡張データから"
+  },
+  "main.from_wireless": {
+    "en": "From another device",
+    "it": "Da un altro dispositivo",
+    "es": "Desde otro dispositivo",
+    "fr": "Depuis un autre appareil",
+    "de": "Von einem anderen Gerät",
+    "pt": "De outro dispositivo",
+    "nl": "Van een ander apparaat",
+    "ja": "他の端末から"
   },
   "main.backup_empty": {
     "en": "Selected backup is empty.",
@@ -1248,16 +1248,6 @@
     "pt": "Pressione X para usar esta pasta.",
     "nl": "Druk op X om deze map te gebruiken.",
     "ja": "Xボタンでこのフォルダを使用します。"
-  },
-  "transfer.choose": {
-    "en": "Choose Send or Receive",
-    "it": "Scegli Invia o Ricevi",
-    "es": "Elige Enviar o Recibir",
-    "fr": "Choisir Envoyer ou Recevoir",
-    "de": "Senden oder Empfangen wählen",
-    "pt": "Escolha Enviar ou Receber",
-    "nl": "Kies Verzenden of Ontvangen",
-    "ja": "送信または受信を選択"
   },
   "transfer.send": {
     "en": "Send",

@@ -25,20 +25,12 @@
  */
 
 #include "TransferOverlay.hpp"
-#include "ModalChrome.hpp"
 #include "common.hpp"
 #include "i18n.hpp"
 #include "main.hpp"
 #include "textpool.hpp"
 #include "transfer.hpp"
 #include "transferstatus.hpp"
-
-TransferMenuOverlay::TransferMenuOverlay(Screen& screen, const std::function<void()>& callbackSend, const std::function<void()>& callbackReceive)
-    : ChoiceOverlay(screen, i18n::t("transfer.choose"),
-          Button{i18n::t("transfer.send"), ModalChrome::BTN_LEFT_X, COLOR_ACCENT, COLOR_WHITE, KEY_R, callbackSend},
-          Button{i18n::t("transfer.receive"), ModalChrome::BTN_RIGHT_X, COLOR_RAISED, COLOR_TEXT, KEY_B, callbackReceive}, KEY_START)
-{
-}
 
 ReceiveOverlay::ReceiveOverlay(Screen& screen) : Overlay(screen) {}
 
