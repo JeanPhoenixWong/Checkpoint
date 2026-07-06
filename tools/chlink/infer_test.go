@@ -22,7 +22,7 @@ func TestInferFromPath(t *testing.T) {
 		},
 		{
 			name: "switch layout full title id", isDir: true, ok: true,
-			path: "/sd/switch/Checkpoint/saves/0100000000010000 Odyssey/my backup",
+			path: "/sd/switch/Checkpoint/saves/0x0100000000010000 Odyssey/my backup",
 			want: InferredMeta{TitleID: "0100000000010000", TitleName: "Odyssey", DataType: "save", BackupName: "my backup"},
 		},
 		{

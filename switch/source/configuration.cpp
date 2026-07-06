@@ -67,6 +67,10 @@ Configuration::Configuration(void)
             mJson["ftp-enabled"] = false;
             updateJson           = true;
         }
+        if (!(mJson.contains("transfer-enabled") && mJson["transfer-enabled"].is_boolean())) {
+            mJson["transfer-enabled"] = false;
+            updateJson                = true;
+        }
         if (!(mJson.contains("confirm-restore") && mJson["confirm-restore"].is_boolean())) {
             mJson["confirm-restore"] = true; // default: confirm, matching prior always-confirm behavior
             updateJson               = true;
@@ -250,6 +254,8 @@ void Configuration::parse(void)
 
     // parse FTP flag
     FTPEnabled = mJson["ftp-enabled"];
+    // parse wireless-transfer flag
+    mTransferEnabled = mJson.value("transfer-enabled", false);
     // parse confirm-restore flag
     mConfirmRestore = mJson.value("confirm-restore", true);
     // parse quick-backup flag
@@ -329,6 +335,18 @@ void Configuration::setFTPEnabled(bool enabled)
 {
     FTPEnabled           = enabled;
     mJson["ftp-enabled"] = enabled;
+    save();
+}
+
+bool Configuration::isTransferEnabled(void)
+{
+    return mTransferEnabled;
+}
+
+void Configuration::setTransferEnabled(bool enabled)
+{
+    mTransferEnabled          = enabled;
+    mJson["transfer-enabled"] = enabled;
     save();
 }
 

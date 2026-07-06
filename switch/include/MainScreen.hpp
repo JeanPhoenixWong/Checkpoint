@@ -70,6 +70,10 @@ protected:
     // Restore the currently selected backup: asks for a YesNo confirmation first
     // unless Settings' confirm-restore toggle is off, then enqueues + starts.
     void requestRestoreSelected(void);
+    // Wireless transfer entry points (gated behind the transfer setting). Send is
+    // contextual (an existing backup must be selected); Receive is global.
+    void startTransferSend(void);
+    void startTransferReceive(void);
 
 private:
     entryType_t type;
@@ -85,6 +89,13 @@ private:
     Hid<HidDirection::HORIZONTAL, HidDirection::HORIZONTAL> hid;
     std::unique_ptr<BackupList> backupList;
     std::unique_ptr<Clickable> buttonBackup, buttonRestore;
+    // Wireless transfer touch buttons (drawn/handled only when the transfer
+    // setting is on). Receive is always available; Send lights up only when an
+    // existing backup is selected.
+    std::unique_ptr<Clickable> buttonSend, buttonReceive;
+    // Frames B has been held to cancel an in-flight network send (parity with the
+    // 45-frame threshold used by ReceiveOverlay).
+    int mCancelHoldFrames = 0;
     // Save-kind rail buttons in UI order, indexed by saveTypeFilter_t. Kept as
     // Clickables purely for their stateful touch-release hit-testing; the rail
     // look is drawn by hand, not through Clickable::draw.

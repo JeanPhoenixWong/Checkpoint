@@ -65,6 +65,13 @@ public:
     bool filteredFavorite(AccountUid uid, saveTypeFilter_t filter, int i);
     Texture* filteredSmallIcon(AccountUid uid, saveTypeFilter_t filter, size_t i);
 
+    // Resolve a title by its id or display name, copying the first match into
+    // `dst`. Used by the wireless receiver to map an incoming backup to a title's
+    // backup folder; returns false when no title matches. Main-thread only, like
+    // every other catalog query.
+    bool getTitleById(Title& dst, u64 id);
+    bool getTitleByName(Title& dst, const std::string& name);
+
     // Big icon of the title with this id (the selected title in the side panel).
     Texture* iconFor(u64 id);
 

@@ -256,6 +256,32 @@ void TitleCatalog::refreshDirectories(u64 id)
     mGeneration++;
 }
 
+bool TitleCatalog::getTitleById(Title& dst, u64 id)
+{
+    for (auto& pair : mTitles) {
+        for (auto& title : pair.second) {
+            if (title.id() == id) {
+                dst = title;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool TitleCatalog::getTitleByName(Title& dst, const std::string& name)
+{
+    for (auto& pair : mTitles) {
+        for (auto& title : pair.second) {
+            if (title.displayName() == name || title.name() == name) {
+                dst = title;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 Texture* TitleCatalog::iconFor(u64 id)
 {
     return mIcons.get(id);

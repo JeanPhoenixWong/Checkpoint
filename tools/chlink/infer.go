@@ -16,11 +16,13 @@ type InferredMeta struct {
 }
 
 var (
+	// Switch title folders: "0x%016llX <name>" (full 16-hex title id with a 0x
+	// prefix — switch/source/titleprobe.cpp). Checked before prefix3DS so the
+	// longer id wins.
+	prefixFullID = regexp.MustCompile(`^0x([0-9A-Fa-f]{16}) `)
 	// 3DS backup folders: "0x%05X <shortDescription>" (unique-ID prefix,
-	// not the full title id — titleprobe.cpp:64).
+	// not the full title id — titleprobe.cpp:64). 5–8 hex, never 16.
 	prefix3DS = regexp.MustCompile(`^0x[0-9A-Fa-f]{5,8} `)
-	// Switch layout (to be confirmed in Phase 4): "<16 hex> <name>".
-	prefixFullID = regexp.MustCompile(`^([0-9A-Fa-f]{16}) `)
 )
 
 // inferFromPath inspects path (pathIsDir tells whether it names the backup

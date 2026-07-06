@@ -29,6 +29,7 @@
 
 #include "io.hpp"
 #include "title.hpp"
+#include "transfer.hpp"
 #include <atomic>
 #include <deque>
 #include <mutex>
@@ -63,6 +64,9 @@ public:
         std::string successMsg;      // shown on success (already resolved)
         std::vector<u64> refreshIds; // title ids whose backup list the main thread must refresh
         bool cancelled = false;      // set when a backup was aborted via requestCancel(); ok is false, res is 0
+        // Set only for a network send: when present the screen maps
+        // SendOutcome::stage to a message instead of the io fields above.
+        std::optional<Transfer::SendOutcome> send;
     };
 
     static TransferJob& get(void)
@@ -76,6 +80,12 @@ public:
     // from. `dstPath`/`srcPath` are already fully resolved.
     void enqueueBackup(Title title, std::string dstPath, std::string successMsg);
     void enqueueRestore(Title title, std::string srcPath, std::string successMsg);
+
+    // Enqueues a wireless send of an existing backup folder. Keyboard prompts
+    // (IP:port, PIN) happen on the main thread before this; the blocking zip +
+    // socket IO runs on the worker. sendBackup drives TransferStatus itself
+    // (beginNetwork), so a send does not use the local batch counter/modal.
+    void enqueueSend(Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port, std::string token);
 
     // Drains the queue on a worker thread, if there is work and none is already
     // running. Idempotent and safe to call with an empty queue.
@@ -105,11 +115,19 @@ private:
     static void runThread(void* arg);
     void run(void);
 
+    enum class Kind { Backup, Restore, Send };
+
     struct WorkItem {
-        bool isRestore;
+        Kind kind = Kind::Backup;
         Title title;
         std::string path;
         std::string successMsg;
+        // Send-only fields (unused for backup/restore).
+        std::string backupName;
+        std::string dataType;
+        std::string ip;
+        u16 port = 0;
+        std::string token;
     };
 
     enum class State { Idle, Running, Done };

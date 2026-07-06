@@ -303,6 +303,20 @@ void SettingsScreen::rebuildRows(void)
             };
             mRows.push_back(std::move(ftp));
 
+            // Master switch for the wireless save-transfer feature; when off the
+            // Send/Receive buttons stay hidden and the /transfer handlers unregistered.
+            Row transfer;
+            transfer.title      = i18n::t("settings.conn.transfer");
+            transfer.subtitle   = i18n::t("settings.conn.transfer.sub");
+            transfer.control    = Control::Toggle;
+            transfer.section    = i18n::t("settings.section.connectivity");
+            transfer.getOn      = [&cfg]() { return cfg.isTransferEnabled(); };
+            transfer.onActivate = [this, &cfg]() {
+                cfg.setTransferEnabled(!cfg.isTransferEnabled());
+                flashSaved();
+            };
+            mRows.push_back(std::move(transfer));
+
             // Address of the built-in HTTP log server (parity with the 3DS build).
             // Open it from any browser on the same network to read the logs.
             const std::string addr = Server::getAddress();

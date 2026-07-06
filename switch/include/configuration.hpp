@@ -55,6 +55,10 @@ public:
     bool filter(u64 id);
     bool favorite(u64 id);
     bool isFTPEnabled(void);
+    // Master switch for the wireless save-transfer feature (Send/Receive over the
+    // network). Default false; keeps the /transfer HTTP handlers unregistered for
+    // users who never use it. Parity with the 3DS transfer toggle.
+    bool isTransferEnabled(void);
     // Whether a restore asks for a YesNo confirmation first (parity with the 3DS
     // confirm_restore setting). Default true — a restore overwrites the save.
     bool isConfirmRestoreEnabled(void);
@@ -83,6 +87,7 @@ public:
     void setFilter(u64 id, bool hidden);
     void setFavorite(u64 id, bool favorite);
     void setFTPEnabled(bool enabled);
+    void setTransferEnabled(bool enabled);
     void setConfirmRestoreEnabled(bool enabled);
     void setQuickBackupEnabled(bool enabled);
     void addAdditionalSaveFolder(u64 id, const std::string& path);
@@ -123,6 +128,7 @@ private:
 
     nlohmann::json mJson;
     bool FTPEnabled;
+    bool mTransferEnabled;
     bool mConfirmRestore;
     bool mQuickBackup;
     std::unordered_set<u64> mFilterIds, mFavoriteIds;

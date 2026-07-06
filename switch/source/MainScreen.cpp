@@ -25,8 +25,11 @@
  */
 
 #include "MainScreen.hpp"
+#include "KeyboardManager.hpp"
+#include "ReceiveOverlay.hpp"
 #include "SettingsScreen.hpp"
 #include "backupsize.hpp"
+#include "configuration.hpp"
 #include "gfxutils.hpp"
 #include "i18n.hpp"
 #include "main.hpp"
@@ -34,6 +37,7 @@
 #include "savekind.hpp"
 #include "shapes.hpp"
 #include "titlecatalog.hpp"
+#include "transfer.hpp"
 #include "transferjob.hpp"
 #include "uikit.hpp"
 #include <algorithm>
@@ -80,6 +84,11 @@ namespace {
     constexpr int BTN_RESTORE_Y = 598;
     constexpr int LIST_Y        = 214;
     constexpr int LIST_ROWS     = 5;
+    // Wireless transfer row: two half-width buttons (Receive | Send) above the
+    // Backup button.
+    constexpr int BTN_TRANSFER_Y = 466;
+    constexpr int BTN_HALF_W     = (BTN_W - 12) / 2;
+    constexpr int BTN_SEND_X     = COL_X + BTN_HALF_W + 12;
 
     std::string backupErrorMessage(io::BackupStage stage)
     {
@@ -129,29 +138,60 @@ namespace {
     constexpr int ACTION_GLYPH_SIZE = 26;
 
     // An action button: filled accent (Backup/Send) or outlined
-    // (Restore/Receive), label + the shoulder-key system glyph centered as a group.
-    void drawActionButton(int x, int y, const std::string& label, const std::string& key, bool filled)
+    // (Restore/Receive), label + the shoulder-key system glyph centered as a
+    // group. An empty `key` draws the label alone (the wireless buttons are
+    // touch-only — every face/shoulder button is already bound).
+    void drawActionButton(int x, int y, const std::string& label, const std::string& key, bool filled, int w = BTN_W)
     {
         // Square buttons (radius 0), matching the 3DS action buttons and the
         // squared rail / rows.
         if (filled) {
-            Shapes::fillRound(x, y, BTN_W, BTN_H, 0, COLOR_ACCENT);
+            Shapes::fillRound(x, y, w, BTN_H, 0, COLOR_ACCENT);
         }
         else {
-            Shapes::strokeRound(x, y, BTN_W, BTN_H, 0, 2, COLOR_STROKE3);
+            Shapes::strokeRound(x, y, w, BTN_H, 0, 2, COLOR_STROKE3);
+        }
+
+        const Color fg = filled ? COLOR_WHITE : COLOR_TEXT;
+
+        u32 lw, lh;
+        Gfx::GetTextDimensions(16, label.c_str(), &lw, &lh);
+        if (key.empty()) {
+            Gfx::DrawText(16, x + (w - (int)lw) / 2, y + (BTN_H - (int)lh) / 2, fg, label.c_str());
+            return;
         }
 
         const std::string glyph = UiKit::buttonGlyph(key);
-        const Color fg          = filled ? COLOR_WHITE : COLOR_TEXT;
-
-        u32 lw, lh, gw, gh;
-        Gfx::GetTextDimensions(16, label.c_str(), &lw, &lh);
+        u32 gw, gh;
         Gfx::GetTextDimensions(ACTION_GLYPH_SIZE, glyph.c_str(), &gw, &gh);
         const int gap   = 10;
         const int group = (int)lw + gap + (int)gw;
-        const int sx    = x + (BTN_W - group) / 2;
+        const int sx    = x + (w - group) / 2;
         Gfx::DrawText(16, sx, y + (BTN_H - (int)lh) / 2, fg, label.c_str());
         Gfx::DrawText(ACTION_GLYPH_SIZE, sx + (int)lw + gap, y + (BTN_H - (int)gh) / 2, fg, glyph.c_str());
+    }
+
+    // Maps a failed network send to a user-facing message (mirrors the 3DS
+    // OutcomeMessages::sendError). EmptyBackup and Cancelled are handled by the
+    // caller as neutral info, so they only appear here as a fallback.
+    std::string sendErrorMessage(const Transfer::SendOutcome& outcome)
+    {
+        switch (outcome.stage) {
+            case Transfer::SendStage::Zip:
+                return i18n::t("outcome.send_zip");
+            case Transfer::SendStage::Socket:
+                return i18n::t("outcome.send_socket");
+            case Transfer::SendStage::Resolve:
+                return i18n::t("outcome.send_resolve");
+            case Transfer::SendStage::Connect:
+                return i18n::t("outcome.send_connect");
+            case Transfer::SendStage::Response:
+                return outcome.detail.empty() ? i18n::t("outcome.send_no_response") : i18n::t("outcome.send_receiver_error", {outcome.detail});
+            case Transfer::SendStage::Send:
+                return i18n::t("outcome.send_interrupted");
+            default:
+                return i18n::t("outcome.send_failed");
+        }
     }
 }
 
@@ -163,6 +203,10 @@ MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, i
     backupList    = std::make_unique<BackupList>(COL_X, LIST_Y, COL_W, LIST_ROWS * BackupList::ROW_PITCH, LIST_ROWS);
     buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup"), true);
     buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("main.restore"), true);
+    buttonReceive =
+        std::make_unique<Clickable>(COL_X, BTN_TRANSFER_Y, BTN_HALF_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("transfer.receive"), true);
+    buttonSend =
+        std::make_unique<Clickable>(BTN_SEND_X, BTN_TRANSFER_Y, BTN_HALF_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("transfer.send"), true);
 
     // The rail Clickables exist only so released() can hit-test touches; the
     // rail is drawn by drawRailItem, not by Clickable::draw.
@@ -377,6 +421,18 @@ void MainScreen::draw() const
         Gfx::DrawText(18, GRID_AREA_X + (GRID_AREA_W - (int)emptyW) / 2, (720 - (int)emptyH) / 2, COLOR_TEXT2, emptyMsg.c_str());
     }
 
+    // ---- Wireless transfer buttons ----
+    // Receive is global (works regardless of the selected title); Send lights up
+    // only when an existing backup is highlighted in the list. Touch-only: every
+    // face/shoulder button is already bound.
+    if (Configuration::getInstance().isTransferEnabled()) {
+        drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.receive"), "", false, BTN_HALF_W);
+        if (filteredCnt > 0 && !MS::multipleSelectionEnabled()) {
+            const bool sendCtx = backupScrollEnabled && backupList->index() != 0;
+            drawActionButton(BTN_SEND_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "", sendCtx, BTN_HALF_W);
+        }
+    }
+
     // ---- Hint bar ----
     // Minus opens Settings (see the class note); no help overlay in this build.
     UiKit::drawHintBar({
@@ -391,6 +447,45 @@ void MainScreen::draw() const
     const TransferSnapshot transfer = TransferStatus::snapshot();
     if (transfer.active) {
         Gfx::DrawRect(0, 0, 1280, 720, COLOR_SCRIM);
+
+        // Network send/receive: a single byte-progress bar plus a hold-B-to-cancel
+        // hint. (During a receive the ReceiveOverlay draws its own card on top of
+        // this; this is what shows for a send, which has no overlay.)
+        if (transfer.kind == TransferKind::Network) {
+            const int mw = 540, mh = 200;
+            const int mx = (1280 - mw) / 2, my = (720 - mh) / 2;
+            Shapes::cardRound(mx, my, mw, mh, 0, COLOR_SURFACE, COLOR_STROKE2, 1);
+
+            std::string titleStr = i18n::t("main.in_progress", {transfer.mode.empty() ? i18n::t("main.transferring") : transfer.mode});
+            u32 tw, th;
+            Gfx::GetTextDimensions(20, titleStr.c_str(), &tw, &th);
+            Gfx::DrawText(20, mx + (mw - (int)tw) / 2, my + 24, COLOR_TEXT, titleStr.c_str());
+
+            const int barX = mx + 24, barW = mw - 48, barH = 18;
+            const int barY = my + 84;
+            float frac     = transfer.bytesTotal > 0 ? (float)transfer.bytesDone / (float)transfer.bytesTotal : 0.0f;
+            if (frac > 1.0f) {
+                frac = 1.0f;
+            }
+            Shapes::fillRound(barX, barY, barW, barH, 0, COLOR_FILL2);
+            if (frac > 0.0f) {
+                Shapes::fillRound(barX, barY, (int)(barW * frac), barH, 0, COLOR_ACCENT);
+            }
+            std::string mb = TransferStatus::bytesToMB(transfer.bytesDone, transfer.bytesTotal);
+            char pctStr[8];
+            snprintf(pctStr, sizeof(pctStr), "%d%%", (int)(frac * 100));
+            u32 pw;
+            Gfx::GetTextDimensions(15, pctStr, &pw, NULL);
+            Gfx::DrawText(15, barX, barY + barH + 6, COLOR_TEXT2, mb.c_str());
+            Gfx::DrawText(15, barX + barW - (int)pw, barY + barH + 6, COLOR_TEXT, pctStr);
+
+            std::string hint = UiKit::buttonGlyph("B") + " " +
+                               (TransferStatus::cancelRequested() ? i18n::t("transfer.cancelling") : i18n::t("transfer.cancel_hint"));
+            u32 hw;
+            Gfx::GetTextDimensions(14, hint.c_str(), &hw, NULL);
+            Gfx::DrawText(14, mx + mw - (int)hw - 16, my + mh - 30, COLOR_TEXT2, hint.c_str());
+            return;
+        }
 
         const bool multiSelect = transfer.saveTotal > 1;
         const int mx = 370, mw = 540;
@@ -467,6 +562,24 @@ void MainScreen::update(const InputState& input)
             TitleCatalog::get().refreshDirectories(id);
             BackupSizeCache::get().invalidate(id); // folders changed → recompute sizes
         }
+        if (result->send) {
+            // A network send: map the outcome to a message. EmptyBackup/Cancelled
+            // are neutral info; every other stage is an error.
+            if (result->send->stage == Transfer::SendStage::EmptyBackup) {
+                currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.backup_empty"));
+            }
+            else if (result->send->stage == Transfer::SendStage::Cancelled) {
+                currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("transfer.cancelled"));
+            }
+            else if (result->send->ok) {
+                blinkLed(4);
+                currentOverlay = std::make_shared<InfoOverlay>(*this, result->successMsg);
+            }
+            else {
+                currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, sendErrorMessage(*result->send));
+            }
+            return;
+        }
         if (result->cancelled) {
             currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.backup_cancelled"));
         }
@@ -486,8 +599,24 @@ void MainScreen::update(const InputState& input)
     // B press on a backup in flight, which requests a cancel (a restore can't be
     // cancelled: aborting mid-write could leave a truncated save on the cartridge).
     if (TransferJob::get().active()) {
-        if ((input.kDown & HidNpadButton_B) && TransferStatus::snapshot().cancellable) {
-            TransferJob::get().requestCancel();
+        TransferSnapshot ts = TransferStatus::snapshot();
+        if (ts.active && ts.kind == TransferKind::Network) {
+            // A network send is cancelled by holding B (parity with the receive
+            // overlay); a stray tap won't kill a long transfer.
+            if (input.kHeld & HidNpadButton_B) {
+                if (++mCancelHoldFrames >= 45 && !TransferStatus::cancelRequested()) {
+                    TransferStatus::requestCancel();
+                }
+            }
+            else {
+                mCancelHoldFrames = 0;
+            }
+        }
+        else {
+            mCancelHoldFrames = 0;
+            if ((input.kDown & HidNpadButton_B) && ts.cancellable) {
+                TransferJob::get().requestCancel();
+            }
         }
         return;
     }
@@ -819,6 +948,75 @@ void MainScreen::handleEvents(const InputState& input)
             }
         }
     }
+
+    // Wireless transfer touch buttons (gated behind the setting). Receive is
+    // global; Send fires only when an existing backup is highlighted, so the
+    // "select a backup first" info box never appears.
+    if (Configuration::getInstance().isTransferEnabled()) {
+        if (buttonReceive->released()) {
+            startTransferReceive();
+            return;
+        }
+        if (backupScrollEnabled && this->index(CELLS) != 0 && buttonSend->released()) {
+            startTransferSend();
+            return;
+        }
+    }
+}
+
+void MainScreen::startTransferReceive(void)
+{
+    // Receiver lifetime == overlay lifetime: start it here, the overlay stops it
+    // on close.
+    std::string error;
+    if (!Transfer::startReceiver(error)) {
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, error.empty() ? i18n::t("main.receiver_failed") : error);
+    }
+    else {
+        currentOverlay = std::make_shared<ReceiveOverlay>(*this);
+    }
+}
+
+void MainScreen::startTransferSend(void)
+{
+    if (!backupScrollEnabled || this->index(CELLS) == 0) {
+        return; // contextual: only a highlighted existing backup can be sent
+    }
+    if (!KeyboardManager::get().isSystemKeyboardAvailable().first) {
+        currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.receiver_failed"));
+        return;
+    }
+
+    const size_t cellIndex = this->index(CELLS);
+    Title title;
+    TitleCatalog::get().getTitle(title, g_currentUId, rawIndex());
+    std::string backupName = nameFromCell(cellIndex);
+    std::string backupPath = title.fullPath(cellIndex);
+
+    // Keyboard + validation on the UI thread; the blocking zip + socket IO runs
+    // on the TransferJob worker.
+    std::pair<bool, std::string> ipResp = KeyboardManager::get().keyboard("192.168.0.10:8000");
+    if (!ipResp.first || ipResp.second.empty()) {
+        return;
+    }
+    auto dst = Transfer::parseTarget(ipResp.second);
+    if (!dst) {
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.invalid_ip_port"));
+        return;
+    }
+
+    std::pair<bool, std::string> pinResp = KeyboardManager::get().keyboard("1234");
+    if (!pinResp.first || pinResp.second.empty()) {
+        return;
+    }
+    if (!Transfer::validPin(pinResp.second)) {
+        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.pin_invalid"));
+        return;
+    }
+
+    TransferJob::get().enqueueSend(
+        std::move(title), std::move(backupPath), std::move(backupName), "save", std::move(dst->ip), dst->port, std::move(pinResp.second));
+    TransferJob::get().start();
 }
 
 std::string MainScreen::nameFromCell(size_t index) const
