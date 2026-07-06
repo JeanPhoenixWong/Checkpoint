@@ -31,6 +31,7 @@
 #include "main.hpp"
 #include "sprites.h"
 #include <citro2d.h>
+#include <string>
 
 inline C3D_RenderTarget* g_top;
 inline C3D_RenderTarget* g_bottom;
@@ -46,6 +47,11 @@ namespace Gui {
 
     void drawPulsingOutline(u32 x, u32 y, u16 w, u16 h, u8 size, u32 color);
     void drawOutline(u32 x, u32 y, u16 w, u16 h, u8 size, u32 color);
+
+    // Filled progress bar with a caption beneath it (left label faint, right label
+    // right-aligned in the text colour), matching the backup/restore modal bars.
+    // `frac` is clamped to [0, 1].
+    void drawProgressBar(float x, float y, float w, float h, float frac, const std::string& leftLabel, const std::string& rightLabel);
 
     C2D_Image noIcon(void);
 }

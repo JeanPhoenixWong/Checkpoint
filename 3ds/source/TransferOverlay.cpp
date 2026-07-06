@@ -83,10 +83,11 @@ void ReceiveOverlay::drawBottom(void) const
     if (networkActive) {
         u64 total = ts.bytesTotal, done = ts.bytesDone;
         int pct            = total > 0 ? (int)((done * 100) / total) : 0;
+        float frac         = total > 0 ? (float)done / (float)total : 0.0f;
         std::string prefix = ts.mode.empty() ? i18n::t("transfer.downloading") : ts.mode;
-        std::string status = StringUtils::format("%s... %d%% (%s)", prefix.c_str(), pct, TransferStatus::bytesToMB(done, total).c_str());
-        text.draw(status, 40, 120, 0.5f, COLOR_MUTED);
-        noticeY = 142;
+        text.draw(prefix, 40, 112, 0.5f, COLOR_TEXT);
+        Gui::drawProgressBar(40, 132, 240, 10, frac, TransferStatus::bytesToMB(done, total), StringUtils::format("%d%%", pct));
+        noticeY = 158;
     }
 
     std::string notice = Transfer::receiverNotice();
@@ -94,12 +95,32 @@ void ReceiveOverlay::drawBottom(void) const
         text.draw(notice, 40, noticeY, 0.45f, COLOR_MUTED);
     }
 
-    text.draw(i18n::t("transfer.close_hint"), 40, 170, 0.5f, COLOR_MUTED);
+    std::string hint = networkActive ? (TransferStatus::cancelRequested() ? i18n::t("transfer.cancelling") : i18n::t("transfer.cancel_hint"))
+                                     : i18n::t("transfer.close_hint");
+    text.draw(hint, 40, 170, 0.5f, COLOR_MUTED);
 }
 
 void ReceiveOverlay::update(const InputState& input)
 {
     (void)input;
+
+    // While an upload is in flight, B means "cancel the transfer", never "close
+    // the overlay": the receiver must stay registered until the server thread
+    // has abandoned the request, so closing waits for the transfer to end.
+    TransferSnapshot ts = TransferStatus::snapshot();
+    if (ts.active && ts.kind == TransferKind::Network) {
+        if (hidKeysHeld() & KEY_B) {
+            if (++mCancelHoldFrames >= 45 && !TransferStatus::cancelRequested()) {
+                TransferStatus::requestCancel();
+            }
+        }
+        else {
+            mCancelHoldFrames = 0;
+        }
+        return;
+    }
+    mCancelHoldFrames = 0;
+
     if (Transfer::receiverHasCompleted() && (hidKeysDown() & KEY_A)) {
         Transfer::stopReceiver();
         Transfer::clearReceiverCompletion();

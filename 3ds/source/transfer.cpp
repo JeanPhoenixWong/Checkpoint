@@ -277,6 +277,12 @@ namespace {
             }
             u32 crc = 0xFFFFFFFFu;
             while (!input.eof()) {
+                if (TransferStatus::cancelRequested()) {
+                    input.close();
+                    output.close();
+                    outError = "Transfer cancelled.";
+                    return false;
+                }
                 u32 rd = input.read(buf.get(), kBuf);
                 if (rd == 0) {
                     break;
@@ -484,6 +490,12 @@ namespace {
             u32 computedCrc = 0xFFFFFFFFu;
             u32 remaining   = compSize;
             while (remaining > 0) {
+                if (TransferStatus::cancelRequested()) {
+                    outError = "Transfer cancelled.";
+                    output.close();
+                    input.close();
+                    return false;
+                }
                 u32 chunk = remaining > kBuf ? kBuf : remaining;
                 u32 rd    = input.read(buf.get(), chunk);
                 if (rd == 0) {
@@ -773,6 +785,10 @@ namespace {
             FSUSER_DeleteFile(Archive::sdmc(), fsMakePath(PATH_UTF16, outputPath.data()));
 
             if (!extracted) {
+                // A failed (or cancelled) extract leaves a half-populated backup
+                // folder behind; remove it so the receiver never keeps a backup
+                // it can't trust.
+                io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
                 cleanup();
                 std::string message = extractError.empty() ? "Failed to extract package." : extractError;
                 return {500, "application/json", "{\"ok\":false,\"error\":\"" + message + "\"}"};
@@ -808,6 +824,35 @@ namespace {
             sent += rc;
         }
         return true;
+    }
+}
+
+void Transfer::sweepTempFiles(void)
+{
+    std::u16string recvPath = StringUtils::UTF8toUTF16(TEMP_ZIP_RECV);
+    if (io::fileExists(Archive::sdmc(), recvPath)) {
+        FSUSER_DeleteFile(Archive::sdmc(), fsMakePath(PATH_UTF16, recvPath.data()));
+        Logging::info("Removed leftover {} from a previous run.", TEMP_ZIP_RECV);
+    }
+
+    const std::u16string root = StringUtils::UTF8toUTF16("/3ds/Checkpoint/");
+    Directory dir(Archive::sdmc(), root);
+    if (!dir.good()) {
+        return;
+    }
+    const std::string prefix = "transfer_send_";
+    const std::string suffix = ".zip";
+    for (size_t i = 0, sz = dir.size(); i < sz; i++) {
+        if (dir.folder(i)) {
+            continue;
+        }
+        std::string name = StringUtils::UTF16toUTF8(dir.entry(i));
+        if (name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 &&
+            name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            std::u16string path = root + dir.entry(i);
+            FSUSER_DeleteFile(Archive::sdmc(), fsMakePath(PATH_UTF16, path.data()));
+            Logging::info("Removed leftover {} from a previous run.", name);
+        }
     }
 }
 
@@ -984,7 +1029,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
         zipGuard.armed = true;
         std::string zipError;
         if (!writeZip(backupPath, zipPath, zipEntries, zipSize, zipError)) {
-            return SendOutcome{false, SendStage::Zip, ""};
+            return SendOutcome{false, TransferStatus::cancelRequested() ? SendStage::Cancelled : SendStage::Zip, ""};
         }
         payloadPath = zipPath;
         payloadName = "backup.zip";
@@ -1075,6 +1120,13 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
             static const u32 kBuf = 0x4000;
             std::unique_ptr<u8[]> buf(new u8[kBuf]);
             while (!input.eof()) {
+                if (TransferStatus::cancelRequested()) {
+                    input.close();
+                    // The scope guards close the socket (dropping the connection,
+                    // which the receiver treats as an aborted request) and delete
+                    // the temp zip.
+                    return SendOutcome{false, SendStage::Cancelled, ""};
+                }
                 u32 rd = input.read(buf.get(), kBuf);
                 if (rd == 0) {
                     break;
@@ -1106,7 +1158,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
     }
 
     if (!ok) {
-        return SendOutcome{false, SendStage::Send, ""};
+        return SendOutcome{false, TransferStatus::cancelRequested() ? SendStage::Cancelled : SendStage::Send, ""};
     }
 
     bool httpOk = response.rfind("HTTP/1.1 200", 0) == 0 || response.rfind("HTTP/1.0 200", 0) == 0;

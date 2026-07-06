@@ -25,6 +25,8 @@
  */
 
 #include "gui.hpp"
+#include "textpool.hpp"
+#include <cmath>
 
 C2D_Image Gui::noIcon(void)
 {
@@ -79,4 +81,22 @@ void Gui::drawOutline(u32 x, u32 y, u16 w, u16 h, u8 size, u32 color)
     C2D_DrawRectSolid(x - size, y, 0.5f, size, h, color);                   // left
     C2D_DrawRectSolid(x + w, y, 0.5f, size, h, color);                      // right
     C2D_DrawRectSolid(x - size, y + h, 0.5f, w + 2 * size, size, color);    // bottom
+}
+
+void Gui::drawProgressBar(float x, float y, float w, float h, float frac, const std::string& leftLabel, const std::string& rightLabel)
+{
+    if (frac > 1.0f) {
+        frac = 1.0f;
+    }
+    if (frac < 0.0f) {
+        frac = 0.0f;
+    }
+    TextPool& text = TextPool::get();
+    C2D_DrawRectSolid(x, y, 0.5f, w, h, COLOR_BLACK_MEDIUM);
+    float fillW = w * frac;
+    if (fillW > 0) {
+        C2D_DrawRectSolid(x, y, 0.5f, fillW, h, COLOR_ACCENT);
+    }
+    text.draw(leftLabel, x, y + h + 3, 0.42f, COLOR_FAINT);
+    text.draw(rightLabel, x + w - ceilf(text.width(rightLabel, 0.42f)), y + h + 3, 0.42f, COLOR_TEXT);
 }

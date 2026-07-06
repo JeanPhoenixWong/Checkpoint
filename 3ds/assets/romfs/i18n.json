@@ -739,6 +739,16 @@
     "nl": "Overdracht mislukt.",
     "ja": "転送に失敗しました。"
   },
+  "outcome.send_interrupted": {
+    "en": "Connection interrupted. The receiver\nmay have cancelled the transfer.",
+    "it": "Connessione interrotta. Il ricevitore\npotrebbe aver annullato il trasferimento.",
+    "es": "Conexión interrumpida. Es posible que\nel receptor haya cancelado la transferencia.",
+    "fr": "Connexion interrompue. Le récepteur\na peut-être annulé le transfert.",
+    "de": "Verbindung unterbrochen. Der Empfänger\nhat die Übertragung evtl. abgebrochen.",
+    "pt": "Conexão interrompida. O receptor\npode ter cancelado a transferência.",
+    "nl": "Verbinding onderbroken. De ontvanger\nheeft de overdracht mogelijk geannuleerd.",
+    "ja": "接続が中断されました。受信側が\n転送をキャンセルした可能性があります。"
+  },
   "main.tab_save": {
     "en": "Save",
     "it": "Salva",
@@ -1338,6 +1348,36 @@
     "pt": "Pressione B para fechar",
     "nl": "Druk op B om te sluiten",
     "ja": "Bボタンで閉じる"
+  },
+  "transfer.cancel_hint": {
+    "en": "Hold B to cancel",
+    "it": "Tieni premuto B per annullare",
+    "es": "Mantén pulsado B para cancelar",
+    "fr": "Maintenez B pour annuler",
+    "de": "B gedrückt halten zum Abbrechen",
+    "pt": "Segure B para cancelar",
+    "nl": "Houd B ingedrukt om te annuleren",
+    "ja": "Bボタン長押しでキャンセル"
+  },
+  "transfer.cancelling": {
+    "en": "Cancelling...",
+    "it": "Annullamento...",
+    "es": "Cancelando...",
+    "fr": "Annulation...",
+    "de": "Wird abgebrochen...",
+    "pt": "Cancelando...",
+    "nl": "Annuleren...",
+    "ja": "キャンセル中..."
+  },
+  "transfer.cancelled": {
+    "en": "Transfer cancelled.",
+    "it": "Trasferimento annullato.",
+    "es": "Transferencia cancelada.",
+    "fr": "Transfert annulé.",
+    "de": "Übertragung abgebrochen.",
+    "pt": "Transferência cancelada.",
+    "nl": "Overdracht geannuleerd.",
+    "ja": "転送をキャンセルしました。"
   },
   "media.sd_card": {
     "en": "SD Card",

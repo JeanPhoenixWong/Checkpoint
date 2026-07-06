@@ -135,6 +135,11 @@ private:
     // Live transfer state, snapshotted once per frame in update() so drawTop and
     // drawBottom don't each take the TransferStatus lock and copy the snapshot.
     TransferSnapshot mTransfer;
+
+    // Frames B has been held while the network-transfer modal is up; requests a
+    // cancel once the hold threshold is reached (guards against a stray tap
+    // killing a long send).
+    int mCancelHoldFrames = 0;
 };
 
 #endif

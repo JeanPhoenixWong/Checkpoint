@@ -46,6 +46,11 @@ namespace Transfer {
     // True iff `pin` is exactly 4 ASCII digits (the receiver token format).
     bool validPin(const std::string& pin);
 
+    // Deletes temp archives a previous crash/power-loss may have left behind:
+    // transfer_recv.zip and every transfer_send_*.zip under /3ds/Checkpoint/.
+    // Called once on boot; normal exits already clean these via scope guards.
+    void sweepTempFiles(void);
+
     bool startReceiver(std::string& outError);
     void stopReceiver(void);
     bool receiverRunning(void);
@@ -62,7 +67,9 @@ namespace Transfer {
     // Where a send stopped. The screen owns the user-facing message for each
     // stage; `detail` carries only receiver-echoed text (HTTP error body or
     // status line), never Checkpoint-authored prose.
-    enum class SendStage { EmptyBackup, Zip, Socket, Resolve, Connect, Send, Response };
+    // Cancelled is not an error: the user asked to stop (hold B), so the screen
+    // shows a neutral info message instead of an error overlay.
+    enum class SendStage { EmptyBackup, Zip, Socket, Resolve, Connect, Send, Response, Cancelled };
 
     struct SendOutcome {
         bool ok         = false;

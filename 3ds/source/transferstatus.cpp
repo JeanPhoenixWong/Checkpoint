@@ -25,17 +25,20 @@
  */
 
 #include "transferstatus.hpp"
+#include <atomic>
 #include <cstdio>
 #include <mutex>
 
 namespace {
     std::mutex sMutex;
     TransferSnapshot sState;
+    std::atomic<bool> sCancel{false};
 }
 
 namespace TransferStatus {
     void beginLocalBatch(size_t totalSaves)
     {
+        sCancel.store(false);
         std::lock_guard<std::mutex> lock(sMutex);
         sState.kind   = TransferKind::Local;
         sState.active = true;
@@ -88,6 +91,7 @@ namespace TransferStatus {
 
     void beginNetwork(const std::string& mode, u64 totalBytes)
     {
+        sCancel.store(false);
         std::lock_guard<std::mutex> lock(sMutex);
         sState.kind       = TransferKind::Network;
         sState.active     = true;
@@ -123,8 +127,19 @@ namespace TransferStatus {
 
     void end()
     {
+        sCancel.store(false);
         std::lock_guard<std::mutex> lock(sMutex);
         sState.active = false;
+    }
+
+    void requestCancel()
+    {
+        sCancel.store(true);
+    }
+
+    bool cancelRequested()
+    {
+        return sCancel.load();
     }
 
     TransferSnapshot snapshot()

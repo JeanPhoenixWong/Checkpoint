@@ -275,13 +275,22 @@ void MainScreen::drawTop(void) const
         C2D_DrawRectSolid(0, 0, 0.5f, 400, 240, COLOR_OVERLAY);
         u64 total = ts.bytesTotal, done = ts.bytesDone;
         int pct            = total > 0 ? (int)((done * 100) / total) : 0;
+        float frac         = total > 0 ? (float)done / (float)total : 0.0f;
         std::string prefix = ts.mode.empty() ? i18n::t("main.transferring") : ts.mode;
-        std::string line1  = i18n::t("main.progress_pct", {prefix, std::to_string(pct)});
-        std::string line2  = TransferStatus::bytesToMB(done, total);
-        const float lh     = 0.7f * fontGetInfo(NULL)->lineFeed;
-        float startY       = ceilf((240 - 2 * lh) / 2);
-        text.drawCentered(line1, 0, 400, startY, 0.7f, COLOR_TEXT);
-        text.drawCentered(line2, 0, 400, startY + lh, 0.7f, COLOR_MUTED);
+
+        const int mw = 260, mh = 120;
+        const int mx = (400 - mw) / 2, my = (240 - mh) / 2;
+        C2D_DrawRectSolid(mx, my, 0.5f, mw, mh, COLOR_CARD);
+        Gui::drawOutline(mx, my, mw, mh, 2, COLOR_ACCENT);
+
+        text.drawCentered(i18n::t("main.in_progress", {prefix}), mx, mw, my + 12, 0.55f, COLOR_TEXT);
+
+        char pctStr[8];
+        snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
+        Gui::drawProgressBar(mx + 12, my + 52, mw - 24, 10, frac, TransferStatus::bytesToMB(done, total), pctStr);
+
+        std::string hint = TransferStatus::cancelRequested() ? i18n::t("transfer.cancelling") : i18n::t("transfer.cancel_hint");
+        text.drawCentered(hint, mx, mw, my + mh - 24, 0.5f, COLOR_FAINT);
     }
 }
 
@@ -404,16 +413,7 @@ void MainScreen::drawBottom(void) const
 
         const int barX = mx + 12, barW = mw - 24, barH = 10;
         auto drawProgressBar = [&](int y, float frac, const char* leftLabel, const char* rightLabel) {
-            if (frac > 1.0f) {
-                frac = 1.0f;
-            }
-            C2D_DrawRectSolid(barX, y, 0.5f, barW, barH, COLOR_BLACK_MEDIUM);
-            int fillW = (int)(barW * frac);
-            if (fillW > 0) {
-                C2D_DrawRectSolid(barX, y, 0.5f, fillW, barH, COLOR_ACCENT);
-            }
-            text.draw(leftLabel, barX, y + barH + 3, 0.42f, COLOR_FAINT);
-            text.draw(rightLabel, barX + barW - ceilf(text.width(rightLabel, 0.42f)), y + barH + 3, 0.42f, COLOR_TEXT);
+            Gui::drawProgressBar(barX, y, barW, barH, frac, leftLabel, rightLabel);
         };
 
         int barY = my + 52;
@@ -447,6 +447,23 @@ void MainScreen::update(const InputState& input)
     // so the modal keeps updating even while a TransferJob is active.
     mTransfer = TransferStatus::snapshot();
 
+    // Hold-B-to-cancel for the network-transfer modal. Must run before the
+    // TransferJob early returns below: while a send is in flight update() bails
+    // out right after the result poll, so this is the only input the modal gets.
+    if (mTransfer.active && mTransfer.kind == TransferKind::Network) {
+        if (hidKeysHeld() & KEY_B) {
+            if (++mCancelHoldFrames >= 45 && !TransferStatus::cancelRequested()) {
+                TransferStatus::requestCancel();
+            }
+        }
+        else {
+            mCancelHoldFrames = 0;
+        }
+    }
+    else {
+        mCancelHoldFrames = 0;
+    }
+
     // Re-read in case the Settings page toggled it while this screen was parked.
     transferEnabled = Configuration::getInstance().transferEnabled();
 
@@ -460,6 +477,10 @@ void MainScreen::update(const InputState& input)
         else if (result->send) {
             if (result->send->stage == Transfer::SendStage::EmptyBackup) {
                 currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("main.backup_empty"));
+            }
+            else if (result->send->stage == Transfer::SendStage::Cancelled) {
+                // User-requested stop: neutral info, not an error.
+                currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("transfer.cancelled"));
             }
             else {
                 currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, OutcomeMessages::sendError(*result->send));

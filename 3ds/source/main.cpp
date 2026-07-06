@@ -34,6 +34,7 @@
 #include "server.hpp"
 #include "textpool.hpp"
 #include "thread.hpp"
+#include "transfer.hpp"
 #include "transferjob.hpp"
 #include "util.hpp"
 #include <chrono>
@@ -61,6 +62,9 @@ int main()
     }
 
     try {
+        // Remove temp transfer archives a previous crash/power-loss left behind.
+        Transfer::sweepTempFiles();
+
         // Match the color tokens to the persisted theme before any screen draws.
         Colors::apply(Configuration::getInstance().theme());
 

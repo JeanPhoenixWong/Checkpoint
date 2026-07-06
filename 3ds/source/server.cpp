@@ -100,9 +100,10 @@ namespace {
     // The 3DS SOC layer doesn't support SO_RCVTIMEO, so we gate recv with poll.
     static const int RECV_TIMEOUT_MS = 15000;
 
-    static std::string readRequest(s32 clientSocket, bool& outTooLarge)
+    static std::string readRequest(s32 clientSocket, bool& outTooLarge, bool& outCancelled)
     {
-        outTooLarge = false;
+        outTooLarge  = false;
+        outCancelled = false;
         std::string data;
         data.reserve(4096);
         // Heap-allocated: the network thread's stack is only DEFAULT_STACK (16 KB),
@@ -116,16 +117,36 @@ namespace {
         std::string path;
         bool trackTransfer = false;
 
+        // Poll in short slices instead of one long wait so a cancel request is
+        // noticed within a second even when the sender has stalled; idleMs
+        // accumulates across empty slices to preserve the overall idle timeout.
+        constexpr int POLL_SLICE_MS = 1000;
+        int idleMs                  = 0;
+
         while (true) {
+            if (trackTransfer && TransferStatus::cancelRequested()) {
+                // The user cancelled the receive: abandon the request entirely.
+                outCancelled = true;
+                break;
+            }
             struct pollfd pfd;
             pfd.fd      = clientSocket;
             pfd.events  = POLLIN;
             pfd.revents = 0;
-            int ready   = poll(&pfd, 1, RECV_TIMEOUT_MS);
-            if (ready <= 0) {
-                // Timed out or poll error: abandon this (possibly stalled) request.
+            int ready   = poll(&pfd, 1, POLL_SLICE_MS);
+            if (ready < 0) {
+                // Poll error: abandon this request.
                 break;
             }
+            if (ready == 0) {
+                idleMs += POLL_SLICE_MS;
+                if (idleMs >= RECV_TIMEOUT_MS) {
+                    // Idle too long: abandon this (possibly stalled) request.
+                    break;
+                }
+                continue;
+            }
+            idleMs   = 0;
             received = recv(clientSocket, buffer.data(), buffer.size(), 0);
             if (received <= 0) {
                 break;
@@ -180,7 +201,16 @@ namespace {
     static void handleHttpRequest(s32 clientSocket)
     {
         bool tooLarge       = false;
-        std::string request = readRequest(clientSocket, tooLarge);
+        bool cancelled      = false;
+        std::string request = readRequest(clientSocket, tooLarge, cancelled);
+        if (cancelled) {
+            // The receiver-side user cancelled mid-download: drop the request
+            // without dispatching a handler; the caller closes the socket, which
+            // the sender sees as a dropped connection.
+            TransferStatus::end();
+            Logging::info("Upload cancelled by the user; request abandoned.");
+            return;
+        }
         if (tooLarge) {
             // Reset any transfer UI state we may have set while reading headers.
             TransferStatus::end();

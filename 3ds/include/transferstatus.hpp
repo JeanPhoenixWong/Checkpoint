@@ -87,6 +87,14 @@ namespace TransferStatus {
     // Ends the run (success or failure); clears the active flag.
     void end();
 
+    // Cooperative cancellation. requestCancel() is set by the UI thread ("hold B
+    // to cancel"); the worker/server loops poll cancelRequested() at chunk
+    // granularity and unwind through their normal failure paths. The flag is
+    // cleared whenever a new run begins (begin*()) and when a run ends (end()),
+    // so a stale request can never bleed into the next transfer.
+    void requestCancel();
+    bool cancelRequested();
+
     // Thread-safe flat copy for the UI to render from.
     TransferSnapshot snapshot();
 
