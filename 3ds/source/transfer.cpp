@@ -131,10 +131,11 @@ namespace {
     void collectFiles(FS_Archive arch, const std::u16string& root, const std::u16string& sub, std::vector<FileEntry>& out,
         std::vector<std::string>* outDirs = nullptr)
     {
-        std::u16string current = root + sub;
-        if (current.empty() || current.back() != u'/') {
+        std::u16string current = root;
+        if (!current.empty() && current.back() != u'/') {
             current += StringUtils::UTF8toUTF16("/");
         }
+        current += sub;
         Directory items(arch, current);
         if (!items.good()) {
             return;

@@ -134,10 +134,11 @@ namespace {
 
     void collectFiles(const std::string& root, const std::string& sub, std::vector<FileEntry>& out, std::vector<std::string>* outDirs = nullptr)
     {
-        std::string current = root + sub;
-        if (current.empty() || current.back() != '/') {
+        std::string current = root;
+        if (!current.empty() && current.back() != '/') {
             current += "/";
         }
+        current += sub;
         Directory items(current);
         if (!items.good()) {
             return;
