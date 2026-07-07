@@ -29,6 +29,7 @@
 #include "backupsize.hpp"
 #include "colors.hpp"
 #include "titlecatalog.hpp"
+#include "transfer.hpp"
 #include "transferjob.hpp"
 extern "C" {
 #include "ftp.h"
@@ -67,6 +68,9 @@ int main(void)
     padInitializeDefault(&pad);
 
     g_screen = std::make_unique<MainScreen>(input);
+
+    // Remove any transfer temp files a previous crash/power-loss left behind.
+    Transfer::sweepTempFiles();
 
     TitleCatalog::get().loadTitles();
     // get the user IDs

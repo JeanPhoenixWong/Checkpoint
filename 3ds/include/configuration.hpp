@@ -59,6 +59,9 @@ public:
     std::string theme(void);
     // "en" (default) or "it". Selects the UI language; see i18n::setLanguage.
     std::string language(void);
+    // Last "ip:port" entered in the wireless-transfer send prompt. Prefilled into
+    // the keyboard next time; not surfaced in Settings. Empty until the first send.
+    std::string lastTransferAddress(void);
     std::vector<std::u16string> additionalSaveFolders(u64 id);
     std::vector<std::u16string> additionalExtdataFolders(u64 id);
 
@@ -82,6 +85,9 @@ public:
     // Persists immediately (calls save()): language changes are rare and must
     // survive even if no commit() follows before shutdown.
     void setLanguage(const std::string& v);
+    // Persists immediately: the send flow doesn't run commit(), and the value
+    // must survive even if the app closes right after a transfer.
+    void setLastTransferAddress(const std::string& v);
 
     // Flushes pending changes to config.json (no-op when nothing is dirty).
     void commit(void);
@@ -119,9 +125,10 @@ private:
     bool mQuickBackup     = false;
     std::string mTheme    = "dark";
     std::string mLanguage = "en";
-    std::string BASEPATH  = "/3ds/Checkpoint/config.json";
-    size_t oldSize        = 0;
-    bool mDirty           = false; // General toggles pending a deferred save()
+    std::string mLastTransferAddress; // last "ip:port" sent to; prefills the send keyboard
+    std::string BASEPATH = "/3ds/Checkpoint/config.json";
+    size_t oldSize       = 0;
+    bool mDirty          = false; // General toggles pending a deferred save()
 };
 
 #endif

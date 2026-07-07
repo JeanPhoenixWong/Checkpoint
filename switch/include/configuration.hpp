@@ -55,6 +55,10 @@ public:
     bool filter(u64 id);
     bool favorite(u64 id);
     bool isFTPEnabled(void);
+    // Master switch for the wireless save-transfer feature (Send/Receive over the
+    // network). Default false; keeps the /transfer HTTP handlers unregistered for
+    // users who never use it. Parity with the 3DS transfer toggle.
+    bool isTransferEnabled(void);
     // Whether a restore asks for a YesNo confirmation first (parity with the 3DS
     // confirm_restore setting). Default true — a restore overwrites the save.
     bool isConfirmRestoreEnabled(void);
@@ -83,6 +87,7 @@ public:
     void setFilter(u64 id, bool hidden);
     void setFavorite(u64 id, bool favorite);
     void setFTPEnabled(bool enabled);
+    void setTransferEnabled(bool enabled);
     void setConfirmRestoreEnabled(bool enabled);
     void setQuickBackupEnabled(bool enabled);
     void addAdditionalSaveFolder(u64 id, const std::string& path);
@@ -98,6 +103,11 @@ public:
     // "en" (default) or "it". Selects the UI language; see i18n::setLanguage.
     std::string language(void);
     void setLanguage(const std::string& language);
+
+    // Last "ip:port" entered in the wireless-transfer send prompt. Prefilled into
+    // the keyboard next time; not surfaced in Settings. Empty until the first send.
+    std::string lastTransferAddress(void);
+    void setLastTransferAddress(const std::string& address);
 
     // Default/current title-grid sort mode. Persisted so it survives a
     // relaunch; the grid's X-button cycle and the Settings "Default sort"
@@ -123,12 +133,14 @@ private:
 
     nlohmann::json mJson;
     bool FTPEnabled;
+    bool mTransferEnabled;
     bool mConfirmRestore;
     bool mQuickBackup;
     std::unordered_set<u64> mFilterIds, mFavoriteIds;
     std::unordered_map<u64, std::vector<std::string>> mAdditionalSaveFolders, mAdditionalDeviceSaveFolders;
     std::string mTheme;
     std::string mLanguage;
+    std::string mLastTransferAddress; // last "ip:port" sent to; prefills the send keyboard
     sort_t mSortMode;
 };
 

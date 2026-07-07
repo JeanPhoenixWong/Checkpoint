@@ -39,20 +39,24 @@
 // presence of more rows obvious.
 //
 // Each row carries a name and a right-aligned meta string (a backup's size, or a
-// caption for the leading "New backup" row). Rebuild the rows every frame with
+// caption for the leading action rows). Rebuild the rows every frame with
 // clear()/push_back(); the component keeps its own selection and scroll offset.
 class BackupList {
 public:
     BackupList(int x, int y, int w, int h, size_t visibleRows);
 
+    // Action rows ("New backup", "Receive") share the teal-tile styling; Existing
+    // rows are regular backups.
+    enum class RowKind { Existing, New, Receive };
+
     struct Row {
         std::string name;
         std::string meta;
-        bool isNew = false;
+        RowKind kind = RowKind::Existing;
     };
 
     void clear(void) { mRows.clear(); }
-    void push_back(const std::string& name, const std::string& meta, bool isNew) { mRows.push_back({name, meta, isNew}); }
+    void push_back(const std::string& name, const std::string& meta, RowKind kind) { mRows.push_back({name, meta, kind}); }
 
     size_t size(void) const { return mRows.size(); }
     size_t index(void) const { return mCursor.index(); }

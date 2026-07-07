@@ -1088,5 +1088,265 @@
     "pt": "Favoritos primeiro",
     "nl": "Favorieten eerst",
     "ja": "お気に入りを優先"
+  },
+  "transfer.send": {
+    "en": "Send",
+    "it": "Invia",
+    "es": "Enviar",
+    "fr": "Envoyer",
+    "de": "Senden",
+    "pt": "Enviar",
+    "nl": "Verzenden",
+    "ja": "送信"
+  },
+  "transfer.receive": {
+    "en": "Receive",
+    "it": "Ricevi",
+    "es": "Recibir",
+    "fr": "Recevoir",
+    "de": "Empfangen",
+    "pt": "Receber",
+    "nl": "Ontvangen",
+    "ja": "受信"
+  },
+  "transfer.unnamed": {
+    "en": "(unnamed backup)",
+    "it": "(backup senza nome)",
+    "es": "(copia sin nombre)",
+    "fr": "(sauvegarde sans nom)",
+    "de": "(unbenanntes Backup)",
+    "pt": "(backup sem nome)",
+    "nl": "(back-up zonder naam)",
+    "ja": "(名称未設定のバックアップ)"
+  },
+  "transfer.file_received": {
+    "en": "File received",
+    "it": "File ricevuto",
+    "es": "Archivo recibido",
+    "fr": "Fichier reçu",
+    "de": "Datei empfangen",
+    "pt": "Arquivo recebido",
+    "nl": "Bestand ontvangen",
+    "ja": "ファイルを受信しました"
+  },
+  "transfer.refresh_hint": {
+    "en": "Press A (OK) to refresh now",
+    "it": "Premi A (OK) per aggiornare",
+    "es": "Pulsa A (Aceptar) para actualizar",
+    "fr": "Appuyez sur A (OK) pour actualiser",
+    "de": "Drücke A (OK) zum Aktualisieren",
+    "pt": "Pressione A (OK) para atualizar agora",
+    "nl": "Druk op A (OK) om nu te vernieuwen",
+    "ja": "Aボタンで今すぐ更新"
+  },
+  "transfer.receiver_stopped": {
+    "en": "Receiver stopped",
+    "it": "Ricevitore fermo",
+    "es": "Receptor detenido",
+    "fr": "Récepteur arrêté",
+    "de": "Empfänger gestoppt",
+    "pt": "Receptor parado",
+    "nl": "Ontvanger gestopt",
+    "ja": "受信を停止しました"
+  },
+  "transfer.downloading": {
+    "en": "Downloading backup",
+    "it": "Download backup",
+    "es": "Descargando copia",
+    "fr": "Téléchargement de la sauvegarde",
+    "de": "Backup wird heruntergeladen",
+    "pt": "Baixando backup",
+    "nl": "Back-up downloaden",
+    "ja": "バックアップをダウンロード中"
+  },
+  "transfer.close_hint": {
+    "en": "Press B to close",
+    "it": "Premi B per chiudere",
+    "es": "Pulsa B para cerrar",
+    "fr": "Appuyez sur B pour fermer",
+    "de": "Drücke B zum Schließen",
+    "pt": "Pressione B para fechar",
+    "nl": "Druk op B om te sluiten",
+    "ja": "Bボタンで閉じる"
+  },
+  "transfer.cancel_hint": {
+    "en": "Hold B to cancel",
+    "it": "Tieni premuto B per annullare",
+    "es": "Mantén pulsado B para cancelar",
+    "fr": "Maintenez B pour annuler",
+    "de": "B gedrückt halten zum Abbrechen",
+    "pt": "Segure B para cancelar",
+    "nl": "Houd B ingedrukt om te annuleren",
+    "ja": "Bボタン長押しでキャンセル"
+  },
+  "transfer.cancelling": {
+    "en": "Cancelling...",
+    "it": "Annullamento...",
+    "es": "Cancelando...",
+    "fr": "Annulation...",
+    "de": "Wird abgebrochen...",
+    "pt": "Cancelando...",
+    "nl": "Annuleren...",
+    "ja": "キャンセル中..."
+  },
+  "transfer.cancelled": {
+    "en": "Transfer cancelled.",
+    "it": "Trasferimento annullato.",
+    "es": "Transferencia cancelada.",
+    "fr": "Transfert annulé.",
+    "de": "Übertragung abgebrochen.",
+    "pt": "Transferência cancelada.",
+    "nl": "Overdracht geannuleerd.",
+    "ja": "転送をキャンセルしました。"
+  },
+  "outcome.send_zip": {
+    "en": "Failed to create backup package.",
+    "it": "Impossibile creare il pacchetto di backup.",
+    "es": "No se pudo crear el paquete de copia de seguridad.",
+    "fr": "Impossible de créer le paquet de sauvegarde.",
+    "de": "Backup-Paket konnte nicht erstellt werden.",
+    "pt": "Falha ao criar o pacote de backup.",
+    "nl": "Kon back-uppakket niet maken.",
+    "ja": "バックアップパッケージの作成に失敗しました。"
+  },
+  "outcome.send_socket": {
+    "en": "Failed to open socket.",
+    "it": "Impossibile aprire il socket.",
+    "es": "No se pudo abrir el socket.",
+    "fr": "Impossible d'ouvrir le socket.",
+    "de": "Socket konnte nicht geöffnet werden.",
+    "pt": "Falha ao abrir o socket.",
+    "nl": "Kon socket niet openen.",
+    "ja": "ソケットを開けませんでした。"
+  },
+  "outcome.send_resolve": {
+    "en": "Invalid IP address.",
+    "it": "Indirizzo IP non valido.",
+    "es": "Dirección IP no válida.",
+    "fr": "Adresse IP invalide.",
+    "de": "Ungültige IP-Adresse.",
+    "pt": "Endereço IP inválido.",
+    "nl": "Ongeldig IP-adres.",
+    "ja": "無効なIPアドレスです。"
+  },
+  "outcome.send_connect": {
+    "en": "Failed to connect.",
+    "it": "Connessione non riuscita.",
+    "es": "No se pudo conectar.",
+    "fr": "Échec de la connexion.",
+    "de": "Verbindung fehlgeschlagen.",
+    "pt": "Falha ao conectar.",
+    "nl": "Verbinden mislukt.",
+    "ja": "接続に失敗しました。"
+  },
+  "outcome.send_no_response": {
+    "en": "Receiver returned no response.",
+    "it": "Il ricevitore non ha risposto.",
+    "es": "El receptor no respondió.",
+    "fr": "Le récepteur n'a pas répondu.",
+    "de": "Empfänger hat nicht geantwortet.",
+    "pt": "O receptor não respondeu.",
+    "nl": "Ontvanger gaf geen reactie.",
+    "ja": "受信側からの応答がありません。"
+  },
+  "outcome.send_receiver_error": {
+    "en": "Receiver error: {0}",
+    "it": "Errore ricevitore: {0}",
+    "es": "Error del receptor: {0}",
+    "fr": "Erreur du récepteur : {0}",
+    "de": "Empfängerfehler: {0}",
+    "pt": "Erro do receptor: {0}",
+    "nl": "Ontvangerfout: {0}",
+    "ja": "受信側エラー: {0}"
+  },
+  "outcome.send_failed": {
+    "en": "Transfer failed.",
+    "it": "Trasferimento non riuscito.",
+    "es": "Transferencia fallida.",
+    "fr": "Échec du transfert.",
+    "de": "Übertragung fehlgeschlagen.",
+    "pt": "Falha na transferência.",
+    "nl": "Overdracht mislukt.",
+    "ja": "転送に失敗しました。"
+  },
+  "outcome.send_interrupted": {
+    "en": "Connection interrupted. The receiver\nmay have cancelled the transfer.",
+    "it": "Connessione interrotta. Il ricevitore\npotrebbe aver annullato il trasferimento.",
+    "es": "Conexión interrumpida. Es posible que\nel receptor haya cancelado la transferencia.",
+    "fr": "Connexion interrompue. Le récepteur\na peut-être annulé le transfert.",
+    "de": "Verbindung unterbrochen. Der Empfänger\nhat die Übertragung evtl. abgebrochen.",
+    "pt": "Conexão interrompida. O receptor\npode ter cancelado a transferência.",
+    "nl": "Verbinding onderbroken. De ontvanger\nheeft de overdracht mogelijk geannuleerd.",
+    "ja": "接続が中断されました。受信側が\n転送をキャンセルした可能性があります。"
+  },
+  "main.transferring": {
+    "en": "Transferring backup",
+    "it": "Trasferimento backup",
+    "es": "Transfiriendo copia",
+    "fr": "Transfert de la sauvegarde",
+    "de": "Backup wird übertragen",
+    "pt": "Transferindo backup",
+    "nl": "Back-up overdragen",
+    "ja": "バックアップを転送中"
+  },
+  "main.backup_empty": {
+    "en": "Selected backup is empty.",
+    "it": "Il backup selezionato è vuoto.",
+    "es": "La copia seleccionada está vacía.",
+    "fr": "La sauvegarde sélectionnée est vide.",
+    "de": "Ausgewähltes Backup ist leer.",
+    "pt": "O backup selecionado está vazio.",
+    "nl": "Geselecteerde back-up is leeg.",
+    "ja": "選択したバックアップは空です。"
+  },
+  "main.receiver_failed": {
+    "en": "Failed to start receiver.",
+    "it": "Impossibile avviare il ricevitore.",
+    "es": "No se pudo iniciar el receptor.",
+    "fr": "Impossible de démarrer le récepteur.",
+    "de": "Empfänger konnte nicht gestartet werden.",
+    "pt": "Falha ao iniciar o receptor.",
+    "nl": "Kon ontvanger niet starten.",
+    "ja": "受信の開始に失敗しました。"
+  },
+  "main.invalid_ip_port": {
+    "en": "Invalid IP:PORT.",
+    "it": "IP:PORTA non valido.",
+    "es": "IP:PUERTO no válido.",
+    "fr": "IP:PORT invalide.",
+    "de": "Ungültige IP:PORT.",
+    "pt": "IP:PORTA inválido.",
+    "nl": "Ongeldig IP:POORT.",
+    "ja": "無効なIP:PORTです。"
+  },
+  "main.pin_invalid": {
+    "en": "PIN must be 4 digits.",
+    "it": "Il PIN deve avere 4 cifre.",
+    "es": "El PIN debe tener 4 dígitos.",
+    "fr": "Le PIN doit comporter 4 chiffres.",
+    "de": "PIN muss 4 Ziffern haben.",
+    "pt": "O PIN deve ter 4 dígitos.",
+    "nl": "PIN moet 4 cijfers hebben.",
+    "ja": "PINは4桁で入力してください。"
+  },
+  "settings.conn.transfer": {
+    "en": "Wi-Fi transfer",
+    "it": "Trasferimento Wi-Fi",
+    "es": "Transferencia Wi-Fi",
+    "fr": "Transfert Wi-Fi",
+    "de": "Wi-Fi-Übertragung",
+    "pt": "Transferência Wi-Fi",
+    "nl": "Wifi-overdracht",
+    "ja": "Wi-Fi転送"
+  },
+  "settings.conn.transfer.sub": {
+    "en": "Send / receive backups over network",
+    "it": "Invia / ricevi backup via rete",
+    "es": "Enviar / recibir copias de seguridad por red",
+    "fr": "Envoyer / recevoir des sauvegardes via le réseau",
+    "de": "Backups über das Netzwerk senden / empfangen",
+    "pt": "Enviar / receber backups pela rede",
+    "nl": "Back-ups verzenden/ontvangen via het netwerk",
+    "ja": "ネットワーク経由でバックアップを送受信"
   }
 }

@@ -36,13 +36,40 @@ namespace {
 void TransferJob::enqueueBackup(Title title, std::string dstPath, std::string successMsg)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    mQueue.push_back(WorkItem{false, std::move(title), std::move(dstPath), std::move(successMsg)});
+    WorkItem item;
+    item.kind       = Kind::Backup;
+    item.title      = std::move(title);
+    item.path       = std::move(dstPath);
+    item.successMsg = std::move(successMsg);
+    mQueue.push_back(std::move(item));
 }
 
 void TransferJob::enqueueRestore(Title title, std::string srcPath, std::string successMsg)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    mQueue.push_back(WorkItem{true, std::move(title), std::move(srcPath), std::move(successMsg)});
+    WorkItem item;
+    item.kind       = Kind::Restore;
+    item.title      = std::move(title);
+    item.path       = std::move(srcPath);
+    item.successMsg = std::move(successMsg);
+    mQueue.push_back(std::move(item));
+}
+
+void TransferJob::enqueueSend(
+    Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port, std::string token)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    WorkItem item;
+    item.kind       = Kind::Send;
+    item.title      = std::move(title);
+    item.path       = std::move(backupPath);
+    item.successMsg = "Transfer completed.";
+    item.backupName = std::move(backupName);
+    item.dataType   = std::move(dataType);
+    item.ip         = std::move(ip);
+    item.port       = port;
+    item.token      = std::move(token);
+    mQueue.push_back(std::move(item));
 }
 
 void TransferJob::start(void)
@@ -52,15 +79,26 @@ void TransferJob::start(void)
     }
 
     size_t total;
+    bool anyLocal = false;
     {
         std::lock_guard<std::mutex> lock(mMutex);
         total = mQueue.size();
+        for (const auto& item : mQueue) {
+            if (item.kind != Kind::Send) {
+                anyLocal = true;
+                break;
+            }
+        }
     }
     if (total == 0) {
         return;
     }
 
-    TransferStatus::beginLocalBatch(total);
+    // Sends drive TransferStatus themselves (beginNetwork inside sendBackup); only
+    // local copies use the batch counter and the local-copy modal.
+    if (anyLocal) {
+        TransferStatus::beginLocalBatch(total);
+    }
     mCancelRequested.store(false);
     mState.store(State::Running);
 
@@ -102,16 +140,28 @@ void TransferJob::run(void)
             mQueue.pop_front();
         }
 
+        if (item.kind == Kind::Send) {
+            Transfer::SendOutcome out = Transfer::sendBackup(item.title, item.path, item.backupName, item.dataType, item.ip, item.port, item.token);
+            last                      = JobResult{};
+            last.isRestore            = false;
+            last.ok                   = out.ok;
+            last.successMsg           = item.successMsg;
+            last.send                 = out;
+            done++;
+            continue;
+        }
+
         TransferStatus::setSaveCount(done);
 
+        const bool isRestore = item.kind == Kind::Restore;
         // Only a backup item's sink is given the cancel flag, so cancelled() is
         // structurally always false while restoring a save.
-        UiProgressSink sink(item.isRestore ? nullptr : &mCancelRequested);
-        io::IoOutcome out = item.isRestore ? io::restore(item.title, item.path, sink) : io::backup(item.title, item.path, sink);
-        if (out.ok && !item.isRestore) {
+        UiProgressSink sink(isRestore ? nullptr : &mCancelRequested);
+        io::IoOutcome out = isRestore ? io::restore(item.title, item.path, sink) : io::backup(item.title, item.path, sink);
+        if (out.ok && !isRestore) {
             refreshIds.push_back(item.title.id());
         }
-        last = JobResult{item.isRestore, out.ok, out.res, out.stage, item.successMsg, {}, out.cancelled};
+        last = JobResult{isRestore, out.ok, out.res, out.stage, item.successMsg, {}, out.cancelled, std::nullopt};
         done++;
 
         if (out.cancelled) {

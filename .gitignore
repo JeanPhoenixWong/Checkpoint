@@ -11,3 +11,6 @@ switch/romfs/cheats/
 .idea
 .DS_Store
 switch/romfs/shaders/
+tools/chlink/chlink
+tools/chlink/chlink.exe
+tools/chlink/dist/

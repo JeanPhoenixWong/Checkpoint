@@ -51,12 +51,25 @@ public:
     // strings), so this returns a mutable reference to the cached copy.
     Title& title(void) { return mTitle; }
 
-    size_t size(void) const { return mNames.size(); }
-    // Real backups only, i.e. excluding the synthetic "New..." entry the model
-    // keeps at index 0 (used for the "BACKUPS · N" header count).
+    // Number of selectable rows on screen (includes the synthetic "New..." row
+    // and, when wireless transfer is on, the "Receive" action row).
+    size_t size(void) const { return displayCount(); }
+    // Real backups only, i.e. excluding the synthetic "New..." entry (index 0)
+    // and the optional "Receive" action row (used for the "BACKUPS · N" header).
     size_t backupCount(void) const { return mNames.size() > 0 ? mNames.size() - 1 : 0; }
     size_t index(void) const { return mIndex; }
+    // cellName takes a *cell* index (into the title's saves list), not a display
+    // row — callers translate a selected row with rowToCell() first.
     std::string cellName(size_t i) const { return i < mNames.size() ? mNames[i] : std::string(); }
+
+    // Wireless-transfer "Receive" action row, mirroring the 3DS list: it sits at
+    // display row 1 (right after "New...") when the transfer feature is enabled.
+    // The rest of the app addresses backups by *cell* index (into the title's
+    // saves list); these translate between the on-screen row and that cell.
+    bool receiveRowEnabled(void) const { return mHasReceiveRow; }
+    bool isReceiveRow(size_t row) const { return mHasReceiveRow && row == 1; }
+    size_t rowToCell(size_t row) const { return (mHasReceiveRow && row > 1) ? row - 1 : row; }
+    size_t cellToRow(size_t cell) const { return (mHasReceiveRow && cell > 0) ? cell + 1 : cell; }
     // Human-readable on-disk size of every backup for this title combined
     // (empty when there are no backups). Shown in the backups header.
     const std::string& totalSizeString(void) const { return mTotalSize; }
@@ -101,8 +114,13 @@ private:
     // Keeps mIndex in range and slides mOffset so the selection stays visible
     // without leaving a trailing gap (mirrors the 3DS ListCursor clamp).
     void clampCursor(void);
+    // On-screen row count: the saves list plus the optional "Receive" row.
+    size_t displayCount(void) const { return mNames.size() + (mHasReceiveRow ? 1 : 0); }
 
     int mListX, mListY, mListW;
+    // Base row budget from the constructor; the live window (mVisibleRows) drops
+    // by one when transfer is enabled so the extra Send button fits below.
+    size_t mBaseVisibleRows;
     size_t mVisibleRows;
     Title mTitle;
     // Row names (index 0 is the synthetic "New..." row) and their aligned on-disk
@@ -121,6 +139,7 @@ private:
     size_t mFilteredIdx      = 0;
     u32 mCatalogGen          = 0;
     u32 mSizeGen             = 0;
+    bool mHasReceiveRow      = false;
 };
 
 #endif

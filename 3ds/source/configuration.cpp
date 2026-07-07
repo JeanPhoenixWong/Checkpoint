@@ -95,6 +95,10 @@ Configuration::Configuration(void)
                     (*mJson)["language"] = "en";
                     updateJson           = true;
                 }
+                if (!(mJson->contains("last_transfer_address") && (*mJson)["last_transfer_address"].is_string())) {
+                    (*mJson)["last_transfer_address"] = "";
+                    updateJson                        = true;
+                }
                 if (!(mJson->contains("filter") && (*mJson)["filter"].is_array())) {
                     (*mJson)["filter"] = nlohmann::json::array();
                     updateJson         = true;
@@ -159,15 +163,16 @@ Configuration::Configuration(void)
                 mFavoriteIds.emplace(strtoull(id.c_str(), NULL, 16));
             }
 
-            mNandSaves       = (*mJson)["nand_saves"];
-            mDSiWareSaves    = (*mJson)["dsiware_saves"];
-            mScanCard        = (*mJson)["scan_cart"];
-            mTransferEnabled = (*mJson)["transfer_enabled"];
-            mConfirmRestore  = (*mJson)["confirm_restore"];
-            mFTPEnabled      = (*mJson)["ftp-enabled"];
-            mQuickBackup     = (*mJson)["quick_backup"];
-            mTheme           = (*mJson)["theme"];
-            mLanguage        = (*mJson)["language"];
+            mNandSaves           = (*mJson)["nand_saves"];
+            mDSiWareSaves        = (*mJson)["dsiware_saves"];
+            mScanCard            = (*mJson)["scan_cart"];
+            mTransferEnabled     = (*mJson)["transfer_enabled"];
+            mConfirmRestore      = (*mJson)["confirm_restore"];
+            mFTPEnabled          = (*mJson)["ftp-enabled"];
+            mQuickBackup         = (*mJson)["quick_backup"];
+            mTheme               = (*mJson)["theme"];
+            mLanguage            = (*mJson)["language"];
+            mLastTransferAddress = (*mJson)["last_transfer_address"];
 
             // parse additional save folders
             auto js = (*mJson)["additional_save_folders"];
@@ -302,6 +307,11 @@ std::string Configuration::language(void)
     return mLanguage;
 }
 
+std::string Configuration::lastTransferAddress(void)
+{
+    return mLastTransferAddress;
+}
+
 void Configuration::setNandSaves(bool v)
 {
     mNandSaves             = v;
@@ -363,6 +373,14 @@ void Configuration::setLanguage(const std::string& v)
     mLanguage            = v;
     (*mJson)["language"] = v;
     mDirty               = true;
+    save();
+}
+
+void Configuration::setLastTransferAddress(const std::string& v)
+{
+    mLastTransferAddress              = v;
+    (*mJson)["last_transfer_address"] = v;
+    mDirty                            = true;
     save();
 }
 

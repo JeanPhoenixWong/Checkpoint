@@ -25,17 +25,22 @@
  */
 
 #include "transferstatus.hpp"
+#include <atomic>
+#include <cstdio>
 #include <mutex>
 
 namespace {
     std::mutex sMutex;
     TransferSnapshot sState;
+    std::atomic<bool> sCancel{false};
 }
 
 namespace TransferStatus {
     void beginLocalBatch(size_t totalSaves)
     {
+        sCancel.store(false);
         std::lock_guard<std::mutex> lock(sMutex);
+        sState.kind        = TransferKind::Local;
         sState.active      = true;
         sState.cancellable = false;
         sState.mode.clear();
@@ -86,15 +91,69 @@ namespace TransferStatus {
         sState.copyCount++;
     }
 
-    void end()
+    void beginNetwork(const std::string& mode, u64 totalBytes)
+    {
+        sCancel.store(false);
+        std::lock_guard<std::mutex> lock(sMutex);
+        sState.kind       = TransferKind::Network;
+        sState.active     = true;
+        sState.mode       = mode;
+        sState.bytesDone  = 0;
+        sState.bytesTotal = totalBytes;
+    }
+
+    void setMode(const std::string& mode)
     {
         std::lock_guard<std::mutex> lock(sMutex);
+        sState.mode = mode;
+    }
+
+    void setBytes(u64 done, u64 total)
+    {
+        std::lock_guard<std::mutex> lock(sMutex);
+        sState.bytesDone  = done;
+        sState.bytesTotal = total;
+    }
+
+    void setBytesDone(u64 done)
+    {
+        std::lock_guard<std::mutex> lock(sMutex);
+        sState.bytesDone = done;
+    }
+
+    void addBytesDone(u64 delta)
+    {
+        std::lock_guard<std::mutex> lock(sMutex);
+        sState.bytesDone += delta;
+    }
+
+    void end()
+    {
+        sCancel.store(false);
+        std::lock_guard<std::mutex> lock(sMutex);
         sState.active = false;
+    }
+
+    void requestCancel()
+    {
+        sCancel.store(true);
+    }
+
+    bool cancelRequested()
+    {
+        return sCancel.load();
     }
 
     TransferSnapshot snapshot()
     {
         std::lock_guard<std::mutex> lock(sMutex);
         return sState;
+    }
+
+    std::string bytesToMB(u64 done, u64 total)
+    {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%.1f / %.1f MB", (double)done / (1024.0 * 1024.0), (double)total / (1024.0 * 1024.0));
+        return std::string(buf);
     }
 }

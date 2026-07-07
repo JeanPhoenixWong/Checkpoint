@@ -739,6 +739,16 @@
     "nl": "Overdracht mislukt.",
     "ja": "転送に失敗しました。"
   },
+  "outcome.send_interrupted": {
+    "en": "Connection interrupted. The receiver\nmay have cancelled the transfer.",
+    "it": "Connessione interrotta. Il ricevitore\npotrebbe aver annullato il trasferimento.",
+    "es": "Conexión interrumpida. Es posible que\nel receptor haya cancelado la transferencia.",
+    "fr": "Connexion interrompue. Le récepteur\na peut-être annulé le transfert.",
+    "de": "Verbindung unterbrochen. Der Empfänger\nhat die Übertragung evtl. abgebrochen.",
+    "pt": "Conexão interrompida. O receptor\npode ter cancelado a transferência.",
+    "nl": "Verbinding onderbroken. De ontvanger\nheeft de overdracht mogelijk geannuleerd.",
+    "ja": "接続が中断されました。受信側が\n転送をキャンセルした可能性があります。"
+  },
   "main.tab_save": {
     "en": "Save",
     "it": "Salva",
@@ -828,16 +838,6 @@
     "pt": "Backup {0} selecionado",
     "nl": "Back-up {0} geselecteerd",
     "ja": "{0}個をバックアップ"
-  },
-  "main.transfer": {
-    "en": "Transfer",
-    "it": "Trasferisci",
-    "es": "Transferir",
-    "fr": "Transférer",
-    "de": "Übertragen",
-    "pt": "Transferir",
-    "nl": "Overdracht",
-    "ja": "転送"
   },
   "main.loading": {
     "en": "Loading titles... {0}%",
@@ -1018,6 +1018,16 @@
     "pt": "Do extdata atual",
     "nl": "Van huidige extdata",
     "ja": "現在の拡張データから"
+  },
+  "main.from_wireless": {
+    "en": "From another device",
+    "it": "Da un altro dispositivo",
+    "es": "Desde otro dispositivo",
+    "fr": "Depuis un autre appareil",
+    "de": "Von einem anderen Gerät",
+    "pt": "De outro dispositivo",
+    "nl": "Van een ander apparaat",
+    "ja": "他の端末から"
   },
   "main.backup_empty": {
     "en": "Selected backup is empty.",
@@ -1249,16 +1259,6 @@
     "nl": "Druk op X om deze map te gebruiken.",
     "ja": "Xボタンでこのフォルダを使用します。"
   },
-  "transfer.choose": {
-    "en": "Choose Send or Receive",
-    "it": "Scegli Invia o Ricevi",
-    "es": "Elige Enviar o Recibir",
-    "fr": "Choisir Envoyer ou Recevoir",
-    "de": "Senden oder Empfangen wählen",
-    "pt": "Escolha Enviar ou Receber",
-    "nl": "Kies Verzenden of Ontvangen",
-    "ja": "送信または受信を選択"
-  },
   "transfer.send": {
     "en": "Send",
     "it": "Invia",
@@ -1348,6 +1348,36 @@
     "pt": "Pressione B para fechar",
     "nl": "Druk op B om te sluiten",
     "ja": "Bボタンで閉じる"
+  },
+  "transfer.cancel_hint": {
+    "en": "Hold B to cancel",
+    "it": "Tieni premuto B per annullare",
+    "es": "Mantén pulsado B para cancelar",
+    "fr": "Maintenez B pour annuler",
+    "de": "B gedrückt halten zum Abbrechen",
+    "pt": "Segure B para cancelar",
+    "nl": "Houd B ingedrukt om te annuleren",
+    "ja": "Bボタン長押しでキャンセル"
+  },
+  "transfer.cancelling": {
+    "en": "Cancelling...",
+    "it": "Annullamento...",
+    "es": "Cancelando...",
+    "fr": "Annulation...",
+    "de": "Wird abgebrochen...",
+    "pt": "Cancelando...",
+    "nl": "Annuleren...",
+    "ja": "キャンセル中..."
+  },
+  "transfer.cancelled": {
+    "en": "Transfer cancelled.",
+    "it": "Trasferimento annullato.",
+    "es": "Transferencia cancelada.",
+    "fr": "Transfert annulé.",
+    "de": "Übertragung abgebrochen.",
+    "pt": "Transferência cancelada.",
+    "nl": "Overdracht geannuleerd.",
+    "ja": "転送をキャンセルしました。"
   },
   "media.sd_card": {
     "en": "SD Card",

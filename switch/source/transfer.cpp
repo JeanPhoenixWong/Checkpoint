@@ -27,36 +27,35 @@
 #include "transfer.hpp"
 #include "common.hpp"
 #include "directory.hpp"
-#include "fsstream.hpp"
 #include "io.hpp"
 #include "json.hpp"
-#include "loader.hpp"
 #include "logging.hpp"
 #include "server.hpp"
+#include "titlecatalog.hpp"
 #include "transferstatus.hpp"
-#include "util.hpp"
-#include <3ds.h>
 #include <algorithm>
+#include <arm_acle.h>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
 namespace {
-    static const int TRANSFER_PORT = 8000;
-    // The server streams the raw upload body here; handleUpload extracts/copies
-    // straight from the file-part byte range, so no separate staged zip is needed.
-    static const char* TEMP_UPLOAD = "/3ds/Checkpoint/transfer_upload.tmp";
-    // Legacy staging file from before the streaming server; still swept on boot.
-    static const char* TEMP_ZIP_RECV_LEGACY = "/3ds/Checkpoint/transfer_recv.zip";
+    constexpr int TRANSFER_PORT        = 8000;
+    const char* CHECKPOINT_ROOT        = "sdmc:/switch/Checkpoint/";
+    const char* SAVES_ROOT             = "sdmc:/switch/Checkpoint/saves/";
+    const char* TEMP_UPLOAD            = "sdmc:/switch/Checkpoint/transfer_upload.tmp";
+    const std::string TEMP_SEND_PREFIX = "transfer_send_";
+    const std::string TEMP_SEND_SUFFIX = ".zip";
 
     std::string g_token;
     std::string g_receiverIp;
@@ -64,12 +63,9 @@ namespace {
     bool g_receiverRunning = false;
     std::atomic<bool> g_pendingRefresh{false};
     std::atomic<bool> g_receiverCompleted{false};
-    // Guards the receiver state shared UI<->network thread: g_token (read by the
-    // server thread in handleUpload, written by the UI thread), g_receiverIp,
-    // g_receiverPort, g_receiverRunning, and g_receiverNotice /
-    // g_receiverCompletedName (written by handleUpload, read by the UI thread).
-    // Pass an empty string to clear the notice/name. TransferReceiver (4.1) is the
-    // real home for this state.
+    std::atomic<u64> g_completedTitleId{0};
+    // Guards the receiver state shared UI<->server thread: g_token, g_receiverIp,
+    // g_receiverPort, g_receiverRunning, and the notice/name strings.
     std::mutex g_receiverMutex;
     std::string g_receiverNotice;
     std::string g_receiverCompletedName;
@@ -87,7 +83,7 @@ namespace {
     }
 
     struct FileEntry {
-        std::u16string absPath;
+        std::string absPath;
         std::string relPath;
         u32 size;
         u32 crc;
@@ -101,87 +97,64 @@ namespace {
         bool isDirectory;
     };
 
-    u32 crcTable[8][256];
-    bool crcInit = false;
-
-    void initCrc(void)
-    {
-        if (crcInit) {
-            return;
-        }
-        for (u32 i = 0; i < 256; ++i) {
-            u32 c = i;
-            for (int j = 0; j < 8; ++j) {
-                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-            }
-            crcTable[0][i] = c;
-        }
-        for (u32 i = 0; i < 256; ++i) {
-            u32 c = crcTable[0][i];
-            for (int t = 1; t < 8; ++t) {
-                c              = crcTable[0][c & 0xFFu] ^ (c >> 8);
-                crcTable[t][i] = c;
-            }
-        }
-        crcInit = true;
-    }
-
-    // Slicing-by-8 CRC32: 8 bytes per iteration instead of 1. On the 268MHz
-    // ARM11 the bytewise loop is slow enough to rival the SD card, so this
-    // keeps the checksum off the transfer's critical path.
+    // Hardware CRC32 (the ZIP/zlib polynomial, not CRC32C): the whole target
+    // already builds with -march=armv8-a+crc, so the checksum is effectively
+    // free instead of a bytewise table loop.
     u32 updateCrc(u32 crc, const u8* data, size_t len)
     {
         u32 c = crc;
         while (len >= 8) {
-            u32 lo = (u32)(data[0] | (data[1] << 8) | (data[2] << 16) | ((u32)data[3] << 24)) ^ c;
-            u32 hi = (u32)(data[4] | (data[5] << 8) | (data[6] << 16) | ((u32)data[7] << 24));
-            c      = crcTable[7][lo & 0xFFu] ^ crcTable[6][(lo >> 8) & 0xFFu] ^ crcTable[5][(lo >> 16) & 0xFFu] ^ crcTable[4][lo >> 24] ^
-                crcTable[3][hi & 0xFFu] ^ crcTable[2][(hi >> 8) & 0xFFu] ^ crcTable[1][(hi >> 16) & 0xFFu] ^ crcTable[0][hi >> 24];
+            u64 v;
+            std::memcpy(&v, data, 8);
+            c = __crc32d(c, v);
             data += 8;
             len -= 8;
         }
-        for (size_t i = 0; i < len; ++i) {
-            c = crcTable[0][(c ^ data[i]) & 0xFFu] ^ (c >> 8);
+        while (len > 0) {
+            c = __crc32b(c, *data++);
+            len--;
         }
         return c;
     }
 
-    void collectFiles(FS_Archive arch, const std::u16string& root, const std::u16string& sub, std::vector<FileEntry>& out,
-        std::vector<std::string>* outDirs = nullptr)
+    u64 fileSize(const std::string& path)
     {
-        std::u16string current = root;
-        if (!current.empty() && current.back() != u'/') {
-            current += StringUtils::UTF8toUTF16("/");
+        struct stat st;
+        if (stat(path.c_str(), &st) != 0) {
+            return 0;
+        }
+        return (u64)st.st_size;
+    }
+
+    void collectFiles(const std::string& root, const std::string& sub, std::vector<FileEntry>& out, std::vector<std::string>* outDirs = nullptr)
+    {
+        std::string current = root;
+        if (!current.empty() && current.back() != '/') {
+            current += "/";
         }
         current += sub;
-        Directory items(arch, current);
+        Directory items(current);
         if (!items.good()) {
             return;
         }
         for (size_t i = 0, sz = items.size(); i < sz; i++) {
-            std::u16string name = items.entry(i);
-            if (name == u"." || name == u"..") {
+            std::string name = items.entry(i);
+            if (name == "." || name == "..") {
                 continue;
             }
             if (items.folder(i)) {
-                std::u16string nextSub = sub + name + StringUtils::UTF8toUTF16("/");
+                std::string nextSub = sub + name + "/";
                 if (outDirs != nullptr) {
-                    outDirs->push_back(StringUtils::UTF16toUTF8(nextSub));
+                    outDirs->push_back(nextSub);
                 }
-                collectFiles(arch, root, nextSub, out, outDirs);
+                collectFiles(root, nextSub, out, outDirs);
             }
             else {
-                std::u16string abs = current + name;
-                std::string rel    = StringUtils::UTF16toUTF8(sub + name);
-                FSStream input(arch, abs, FS_OPEN_READ);
-                if (!input.good()) {
-                    continue;
-                }
                 FileEntry entry;
-                entry.absPath = abs;
-                entry.relPath = rel;
-                entry.size    = input.size();
-                input.close();
+                entry.absPath = current + name;
+                entry.relPath = sub + name;
+                entry.size    = (u32)fileSize(entry.absPath);
+                entry.crc     = 0;
                 out.push_back(entry);
             }
         }
@@ -219,10 +192,10 @@ namespace {
         return total;
     }
 
-    bool ensureDirectoryPath(const std::u16string& base, const std::string& relPath)
+    void ensureDirectoryPath(const std::string& base, const std::string& relPath)
     {
-        std::u16string current = base;
-        size_t start           = 0;
+        std::string current = base;
+        size_t start        = 0;
         while (true) {
             size_t pos = relPath.find('/', start);
             if (pos == std::string::npos) {
@@ -230,15 +203,14 @@ namespace {
             }
             std::string part = relPath.substr(start, pos - start);
             if (!part.empty()) {
-                current += StringUtils::UTF8toUTF16(part.c_str());
-                if (!io::directoryExists(Archive::sdmc(), current)) {
-                    io::createDirectory(Archive::sdmc(), current);
+                current += part;
+                if (!io::directoryExists(current)) {
+                    io::createDirectory(current);
                 }
-                current += StringUtils::UTF8toUTF16("/");
+                current += "/";
             }
             start = pos + 1;
         }
-        return true;
     }
 
     bool isSafeZipRelativePath(const std::string& relPath)
@@ -273,35 +245,38 @@ namespace {
         return true;
     }
 
-    // Extracts a store-only ZIP that lives inside `zipPath` at [startOffset,
-    // startOffset+limit). Reading straight from the streamed multipart body at
-    // the file part's byte range avoids holding the payload in RAM or copying it
-    // to a second staging file.
-    bool extractZip(const std::u16string& zipPath, u64 startOffset, u64 limit, const std::u16string& destRoot, std::string& outError)
+    // Extracts a store-only ZIP that lives inside `zipFilePath` at [startOffset,
+    // startOffset+limit). Reading straight from the multipart body temp file at
+    // the file part's byte range avoids ever holding the payload in RAM or
+    // copying it to a second staging file.
+    bool extractZip(const std::string& zipFilePath, u64 startOffset, u64 limit, const std::string& destRoot, std::string& outError)
     {
-        FSStream input(Archive::sdmc(), zipPath, FS_OPEN_READ);
-        if (!input.good()) {
+        FILE* input = fopen(zipFilePath.c_str(), "rb");
+        if (input == nullptr) {
             outError = "Failed to open received package.";
             return false;
         }
-        input.offset((u32)startOffset);
+        if (fseek(input, (long)startOffset, SEEK_SET) != 0) {
+            fclose(input);
+            outError = "Failed to open received package.";
+            return false;
+        }
 
         u64 consumed  = 0;
-        auto readInto = [&](void* dst, size_t n) -> u32 {
+        auto readInto = [&](void* dst, size_t n) -> size_t {
             if (consumed + n > limit) {
                 n = (size_t)(limit - consumed);
             }
             if (n == 0) {
                 return 0;
             }
-            u32 rd = input.read(dst, (u32)n);
+            size_t rd = fread(dst, 1, n, input);
             consumed += rd;
             return rd;
         };
 
-        static const u32 kBuf = 0x40000;
+        static const size_t kBuf = 0x40000;
         std::unique_ptr<u8[]> buf(new u8[kBuf]);
-        initCrc();
 
         bool ok = true;
         while (consumed + 4 <= limit) {
@@ -324,8 +299,9 @@ namespace {
             u32 crc         = (u32)(hdr[10] | (hdr[11] << 8) | (hdr[12] << 16) | (hdr[13] << 24));
             u32 compSize    = (u32)(hdr[14] | (hdr[15] << 8) | (hdr[16] << 16) | (hdr[17] << 24));
             u32 uncompSize  = (u32)(hdr[18] | (hdr[19] << 8) | (hdr[20] << 16) | (hdr[21] << 24));
-            u16 nameLen     = (u16)(hdr[22] | (hdr[23] << 8));
-            u16 extraLen    = (u16)(hdr[24] | (hdr[25] << 8));
+            (void)uncompSize;
+            u16 nameLen  = (u16)(hdr[22] | (hdr[23] << 8));
+            u16 extraLen = (u16)(hdr[24] | (hdr[25] << 8));
 
             std::string name;
             name.resize(nameLen);
@@ -358,17 +334,17 @@ namespace {
             }
 
             if (!name.empty() && name.back() == '/') {
-                std::u16string dirPath = destRoot + StringUtils::UTF8toUTF16(name.c_str());
-                if (!io::directoryExists(Archive::sdmc(), dirPath)) {
-                    io::createDirectory(Archive::sdmc(), dirPath);
+                std::string dirPath = destRoot + name;
+                if (!io::directoryExists(dirPath)) {
+                    io::createDirectory(dirPath);
                 }
                 continue;
             }
 
             ensureDirectoryPath(destRoot, name);
-            std::u16string outPath = destRoot + StringUtils::UTF8toUTF16(name.c_str());
-            FSStream output(Archive::sdmc(), outPath, FS_OPEN_WRITE, uncompSize);
-            if (!output.good()) {
+            std::string outPath = destRoot + name;
+            FILE* output        = fopen(outPath.c_str(), "wb");
+            if (output == nullptr) {
                 outError = "Failed to write extracted file.";
                 ok       = false;
                 break;
@@ -384,18 +360,18 @@ namespace {
                     break;
                 }
                 u32 chunk = remaining > kBuf ? kBuf : remaining;
-                u32 rd    = readInto(buf.get(), chunk);
+                size_t rd = readInto(buf.get(), chunk);
                 if (rd == 0) {
                     outError = "Corrupted ZIP payload.";
                     fileOk   = false;
                     break;
                 }
                 computedCrc = updateCrc(computedCrc, buf.get(), rd);
-                output.write(buf.get(), rd);
-                remaining -= rd;
+                fwrite(buf.get(), 1, rd, output);
+                remaining -= (u32)rd;
                 TransferStatus::addBytesDone(rd);
             }
-            output.close();
+            fclose(output);
             if (!fileOk) {
                 ok = false;
                 break;
@@ -430,9 +406,6 @@ namespace {
                 }
             }
 
-            // Verify the extracted data against the CRC stored in the ZIP entry,
-            // so a corrupted or truncated transfer is rejected instead of being
-            // written out as-is.
             computedCrc ^= 0xFFFFFFFFu;
             if (computedCrc != crc) {
                 outError = "Checksum mismatch in received file.";
@@ -441,7 +414,7 @@ namespace {
             }
         }
 
-        input.close();
+        fclose(input);
         return ok;
     }
 
@@ -468,45 +441,49 @@ namespace {
     // [outFileOffset, outFileOffset+outFileLen) into the body file, so the (large)
     // payload is never buffered. Assumes the protocol layout: meta part first,
     // then a single file part that is the last part before the closing delimiter.
-    bool parseMultipartFile(const std::u16string& bodyPath, u64 bodyLen, const std::string& boundary, std::string& outMeta, u64& outFileOffset,
+    bool parseMultipartFile(const std::string& bodyPath, u64 bodyLen, const std::string& boundary, std::string& outMeta, u64& outFileOffset,
         u64& outFileLen, std::string& outError)
     {
         outMeta.clear();
         outFileOffset = 0;
         outFileLen    = 0;
 
-        FSStream f(Archive::sdmc(), bodyPath, FS_OPEN_READ);
-        if (!f.good()) {
+        FILE* f = fopen(bodyPath.c_str(), "rb");
+        if (f == nullptr) {
             outError = "Failed to open upload body.";
             return false;
         }
 
         // The meta part and both part headers sit at the very start of the body;
         // read a bounded head window to locate them without scanning the payload.
-        const u32 headWindow = 64 * 1024;
-        u32 headLen          = (u32)(bodyLen < headWindow ? bodyLen : headWindow);
+        const size_t headWindow = 64 * 1024;
+        size_t headLen          = (size_t)std::min<u64>(headWindow, bodyLen);
         std::string head;
         head.resize(headLen);
-        if (headLen > 0 && f.read(head.data(), headLen) != headLen) {
-            f.close();
+        if (headLen > 0 && fread(head.data(), 1, headLen, f) != headLen) {
+            fclose(f);
             outError = "Failed to read upload body.";
             return false;
         }
-        f.close();
+        fclose(f);
 
         std::string boundaryMarker     = "--" + boundary;
         std::string nextBoundaryMarker = "\r\n" + boundaryMarker;
 
+        // Meta part.
         size_t metaPos = head.find(boundaryMarker);
         if (metaPos == std::string::npos) {
             outError = "Missing boundary.";
             return false;
         }
+        // Find the file part header.
         size_t filePos = head.find("name=\"file\"");
         if (filePos == std::string::npos) {
             outError = "Incomplete form data.";
             return false;
         }
+        // Meta content: between the meta part's header terminator and the boundary
+        // that precedes the file part.
         size_t metaHeaderEnd = head.find("\r\n\r\n", metaPos);
         if (metaHeaderEnd == std::string::npos) {
             outError = "Incomplete form data.";
@@ -520,6 +497,7 @@ namespace {
         }
         outMeta = head.substr(metaDataStart, metaDataEnd - metaDataStart);
 
+        // File data begins right after the file part's header terminator.
         size_t fileHeaderEnd = head.find("\r\n\r\n", filePos);
         if (fileHeaderEnd == std::string::npos) {
             outError = "Incomplete form data.";
@@ -539,21 +517,7 @@ namespace {
         return true;
     }
 
-    Server::HttpResponse handleInfo(const std::string&, const std::string&)
-    {
-        // Note: the PIN token is intentionally NOT exposed here. It must only ever
-        // be shown on the receiver's screen and entered manually on the sender, so
-        // that a device on the same network cannot read it and authenticate itself.
-        nlohmann::json info;
-        info["device"]         = "3DS";
-        info["version"]        = StringUtils::format("%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
-        info["maxUploadBytes"] = 0;
-        info["freeSpaceBytes"] = 0;
-        return {200, "application/json", info.dump()};
-    }
-
-    // Constant-time comparison so a wrong PIN can't be narrowed down by timing
-    // how far the comparison got before it failed.
+    // Constant-time comparison so a wrong PIN can't be narrowed down by timing.
     bool constantTimeEquals(const std::string& a, const std::string& b)
     {
         if (a.size() != b.size()) {
@@ -566,9 +530,27 @@ namespace {
         return diff == 0;
     }
 
+    Server::HttpResponse handleInfo(const std::string&, const std::string&)
+    {
+        // The PIN is intentionally NOT exposed here: it must only ever be shown on
+        // the receiver's screen and typed on the sender, so a device on the same
+        // network can't read it and authenticate itself.
+        nlohmann::json info;
+        info["device"]         = "Switch";
+        info["version"]        = StringUtils::format("%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
+        info["maxUploadBytes"] = 0; // 0 = unlimited: the body is streamed to SD, not buffered in RAM
+        info["freeSpaceBytes"] = 0;
+        return {200, "application/json", info.dump()};
+    }
+
+    // Streaming upload handler: the server has already written the raw multipart
+    // body to `req.bodyPath`. We parse the meta out of the head, resolve the
+    // destination title, then extract the ZIP (or copy the raw file) straight
+    // from the body temp file's file-part byte range.
     Server::HttpResponse handleUpload(const Server::UploadRequest& req)
     {
-        auto cleanup      = []() { TransferStatus::end(); };
+        auto cleanup = []() { TransferStatus::end(); };
+
         std::string token = headerValue(req.headers, "X-CP-Token");
         std::string expectedToken;
         {
@@ -591,12 +573,11 @@ namespace {
             boundary = boundary.substr(1, boundary.size() - 2);
         }
 
-        std::u16string bodyPath = StringUtils::UTF8toUTF16(req.bodyPath.c_str());
         std::string metaJson;
         u64 fileOffset = 0;
         u64 fileLen    = 0;
         std::string error;
-        if (!parseMultipartFile(bodyPath, req.bodyLength, boundary, metaJson, fileOffset, fileLen, error)) {
+        if (!parseMultipartFile(req.bodyPath, req.bodyLength, boundary, metaJson, fileOffset, fileLen, error)) {
             cleanup();
             return {400, "application/json", "{\"ok\":false,\"error\":\"Bad upload\"}"};
         }
@@ -607,7 +588,6 @@ namespace {
             return {400, "application/json", "{\"ok\":false,\"error\":\"Invalid meta\"}"};
         }
 
-        std::string dataType   = meta.value("dataType", "save");
         std::string titleId    = meta.value("titleId", "");
         std::string titleName  = meta.value("titleName", "Unknown");
         std::string backupName = meta.value("backupName", "");
@@ -617,26 +597,27 @@ namespace {
             backupName = "Received_" + DateTime::dateTimeStr();
         }
 
-        std::u16string basePath = StringUtils::UTF8toUTF16(dataType == "extdata" ? "/3ds/Checkpoint/extdata/" : "/3ds/Checkpoint/saves/");
-
-        std::u16string destRoot;
+        std::string destRoot;
         bool foundTitle   = false;
         bool mappedByName = false;
         u64 tid           = 0;
+        u64 resolvedId    = 0;
         if (!titleId.empty()) {
             tid = strtoull(titleId.c_str(), nullptr, 16);
         }
         if (tid != 0) {
             Title t;
             if (TitleCatalog::get().getTitleById(t, tid)) {
-                destRoot   = (dataType == "extdata") ? t.extdataPath() : t.savePath();
+                destRoot   = t.path();
+                resolvedId = t.id();
                 foundTitle = true;
             }
         }
         if (!foundTitle && !titleName.empty()) {
             Title t;
             if (TitleCatalog::get().getTitleByName(t, titleName)) {
-                destRoot     = (dataType == "extdata") ? t.extdataPath() : t.savePath();
+                destRoot     = t.path();
+                resolvedId   = t.id();
                 foundTitle   = true;
                 mappedByName = true;
                 setReceiverNotice("Warning: title ID mismatch. Backup mapped by title name.");
@@ -650,35 +631,35 @@ namespace {
             if (!titleId.empty()) {
                 folder = titleId + " " + safeName;
             }
-            destRoot = basePath + StringUtils::removeForbiddenCharacters(StringUtils::UTF8toUTF16(folder.c_str()));
-            if (!io::directoryExists(Archive::sdmc(), destRoot)) {
-                io::createDirectory(Archive::sdmc(), destRoot);
+            destRoot = std::string(SAVES_ROOT) + StringUtils::removeForbiddenCharacters(folder);
+            if (!io::directoryExists(destRoot)) {
+                io::createDirectory(destRoot);
             }
-            setReceiverNotice("Warning: unknown title. Stored in:\n" + StringUtils::UTF16toUTF8(destRoot));
-            Logging::warning("Received backup for unknown title {} (stored under {}).", titleId, StringUtils::UTF16toUTF8(destRoot));
+            setReceiverNotice("Warning: unknown title. Stored in:\n" + destRoot);
+            Logging::warning("Received backup for unknown title {} (stored under {}).", titleId, destRoot);
         }
 
-        std::u16string backupRoot = destRoot + StringUtils::UTF8toUTF16("/") +
-                                    StringUtils::removeForbiddenCharacters(StringUtils::UTF8toUTF16(backupName.c_str())) +
-                                    StringUtils::UTF8toUTF16("/");
-        if (io::directoryExists(Archive::sdmc(), backupRoot)) {
-            io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
+        std::string backupRoot = destRoot + "/" + StringUtils::removeForbiddenCharacters(backupName) + "/";
+        if (io::directoryExists(backupRoot)) {
+            io::deleteFolderRecursively(backupRoot);
         }
-        io::createDirectory(Archive::sdmc(), backupRoot);
+        io::createDirectory(backupRoot);
 
         if (isZip) {
             TransferStatus::beginNetwork("Extracting package", fileLen);
-
             std::string extractError;
-            bool extracted = extractZip(bodyPath, fileOffset, fileLen, backupRoot, extractError);
+            bool extracted = extractZip(req.bodyPath, fileOffset, fileLen, backupRoot, extractError);
             if (!extracted) {
                 // A failed (or cancelled) extract leaves a half-populated backup
                 // folder behind; remove it so the receiver never keeps a backup
                 // it can't trust.
-                io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
+                io::deleteFolderRecursively(backupRoot);
                 cleanup();
                 std::string message = extractError.empty() ? "Failed to extract package." : extractError;
-                return {500, "application/json", "{\"ok\":false,\"error\":\"" + message + "\"}"};
+                nlohmann::json err;
+                err["ok"]    = false;
+                err["error"] = message;
+                return {500, "application/json", err.dump()};
             }
             TransferStatus::setBytesDone(fileLen);
         }
@@ -687,31 +668,28 @@ namespace {
             if (fileName.empty()) {
                 fileName = "received.bin";
             }
-            std::u16string safeFileName  = StringUtils::removeForbiddenCharacters(StringUtils::UTF8toUTF16(fileName.c_str()));
-            std::string safeFileNameUtf8 = StringUtils::UTF16toUTF8(safeFileName);
-            if (safeFileNameUtf8.empty()) {
-                safeFileNameUtf8 = "received.bin";
-                safeFileName     = StringUtils::UTF8toUTF16("received.bin");
+            std::string safeFileName = StringUtils::removeForbiddenCharacters(fileName);
+            if (safeFileName.empty()) {
+                safeFileName = "received.bin";
             }
-            ensureDirectoryPath(backupRoot, safeFileNameUtf8);
-            std::u16string outputPath = backupRoot + safeFileName;
+            ensureDirectoryPath(backupRoot, safeFileName);
+            std::string outPath = backupRoot + safeFileName;
 
-            // Copy the file-part byte range straight out of the streamed body.
-            FSStream input(Archive::sdmc(), bodyPath, FS_OPEN_READ);
-            FSStream output(Archive::sdmc(), outputPath, FS_OPEN_WRITE, (u32)fileLen);
-            if (!input.good() || !output.good()) {
-                if (input.good()) {
-                    input.close();
+            FILE* src = fopen(req.bodyPath.c_str(), "rb");
+            FILE* dst = fopen(outPath.c_str(), "wb");
+            if (src == nullptr || dst == nullptr) {
+                if (src) {
+                    fclose(src);
                 }
-                if (output.good()) {
-                    output.close();
+                if (dst) {
+                    fclose(dst);
                 }
-                io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
+                io::deleteFolderRecursively(backupRoot);
                 cleanup();
                 return {500, "application/json", "{\"ok\":false,\"error\":\"Failed to store file\"}"};
             }
-            input.offset((u32)fileOffset);
-            static const u32 kBuf = 0x40000;
+            fseek(src, (long)fileOffset, SEEK_SET);
+            static const size_t kBuf = 0x40000;
             std::unique_ptr<u8[]> buf(new u8[kBuf]);
             u64 remaining = fileLen;
             bool copyOk   = true;
@@ -720,20 +698,19 @@ namespace {
                     copyOk = false;
                     break;
                 }
-                u32 chunk = remaining > kBuf ? kBuf : (u32)remaining;
-                u32 rd    = input.read(buf.get(), chunk);
+                size_t chunk = remaining > kBuf ? kBuf : (size_t)remaining;
+                size_t rd    = fread(buf.get(), 1, chunk, src);
                 if (rd == 0) {
                     copyOk = false;
                     break;
                 }
-                output.write(buf.get(), rd);
+                fwrite(buf.get(), 1, rd, dst);
                 remaining -= rd;
-                TransferStatus::addBytesDone(rd);
             }
-            input.close();
-            output.close();
+            fclose(src);
+            fclose(dst);
             if (!copyOk) {
-                io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
+                io::deleteFolderRecursively(backupRoot);
                 cleanup();
                 return {500, "application/json", "{\"ok\":false,\"error\":\"Failed to store file\"}"};
             }
@@ -745,12 +722,13 @@ namespace {
             setReceiverNotice("");
         }
         setReceiverCompletedName(backupName);
+        g_completedTitleId.store(resolvedId);
         g_receiverCompleted.store(true);
         g_pendingRefresh.store(true);
 
         nlohmann::json resp;
         resp["ok"]        = true;
-        resp["savedPath"] = StringUtils::UTF16toUTF8(backupRoot);
+        resp["savedPath"] = backupRoot;
         return {200, "application/json", resp.dump()};
     }
 
@@ -769,7 +747,7 @@ namespace {
     }
 
     // Streams the store-only ZIP straight into the socket, so each backup byte
-    // is read from SD exactly once (the old path staged a temp zip: read +
+    // is read from disk exactly once (the old path staged a temp zip: read +
     // write + re-read). File CRCs are unknown until the data has been sent, so
     // file entries set general-purpose flag bit 3 and carry the real CRC in a
     // signed 16-byte data descriptor after the data; the local header still
@@ -779,17 +757,16 @@ namespace {
     bool sendZipStream(int sock, const std::vector<FileEntry>& files, const std::vector<std::string>& dirs, bool& cancelled)
     {
         cancelled = false;
-        initCrc();
 
         std::vector<ZipEntry> central;
         central.reserve(dirs.size() + files.size());
         u32 offset = 0;
 
-        auto sendChunk = [&](const void* data, u32 n) -> bool {
+        auto sendChunk = [&](const void* data, size_t n) -> bool {
             if (!sendAll(sock, data, n)) {
                 return false;
             }
-            offset += n;
+            offset += (u32)n;
             TransferStatus::addBytesDone(n);
             return true;
         };
@@ -823,7 +800,7 @@ namespace {
             central.push_back(centralEntry);
         }
 
-        static const u32 kBuf = 0x40000;
+        static const size_t kBuf = 0x40000;
         std::unique_ptr<u8[]> buf(new u8[kBuf]);
 
         for (const auto& entry : files) {
@@ -852,34 +829,34 @@ namespace {
                 return false;
             }
 
-            FSStream input(Archive::sdmc(), entry.absPath, FS_OPEN_READ);
-            if (!input.good()) {
+            FILE* input = fopen(entry.absPath.c_str(), "rb");
+            if (input == nullptr) {
                 return false;
             }
             u32 crc       = 0xFFFFFFFFu;
             u32 remaining = entry.size;
             while (remaining > 0) {
                 if (TransferStatus::cancelRequested()) {
-                    input.close();
+                    fclose(input);
                     cancelled = true;
                     return false;
                 }
-                u32 chunk = remaining > kBuf ? kBuf : remaining;
-                u32 rd    = input.read(buf.get(), chunk);
+                size_t chunk = remaining > kBuf ? kBuf : (size_t)remaining;
+                size_t rd    = fread(buf.get(), 1, chunk, input);
                 if (rd == 0) {
                     // Short read: the promised sizes can no longer be met, so
                     // the transfer must fail rather than desync the stream.
-                    input.close();
+                    fclose(input);
                     return false;
                 }
                 crc = updateCrc(crc, buf.get(), rd);
                 if (!sendChunk(buf.get(), rd)) {
-                    input.close();
+                    fclose(input);
                     return false;
                 }
-                remaining -= rd;
+                remaining -= (u32)rd;
             }
-            input.close();
+            fclose(input);
             crc ^= 0xFFFFFFFFu;
 
             std::string desc;
@@ -914,7 +891,7 @@ namespace {
             appendLe16(tail, 0);
             appendLe16(tail, 0);
             appendLe16(tail, 0);
-            appendLe32(tail, entry.isDirectory ? (((u32)FS_ATTRIBUTE_DIRECTORY) << 16) : 0);
+            appendLe32(tail, entry.isDirectory ? 0x10 : 0); // FILE_ATTRIBUTE_DIRECTORY
             appendLe32(tail, entry.offset);
             tail.append(entry.name);
         }
@@ -935,30 +912,24 @@ namespace {
 
 void Transfer::sweepTempFiles(void)
 {
-    for (const char* leftover : {TEMP_UPLOAD, TEMP_ZIP_RECV_LEGACY}) {
-        std::u16string p = StringUtils::UTF8toUTF16(leftover);
-        if (io::fileExists(Archive::sdmc(), p)) {
-            FSUSER_DeleteFile(Archive::sdmc(), fsMakePath(PATH_UTF16, p.data()));
-            Logging::info("Removed leftover {} from a previous run.", leftover);
-        }
+    if (io::fileExists(TEMP_UPLOAD)) {
+        std::remove(TEMP_UPLOAD);
+        Logging::info("Removed leftover {} from a previous run.", TEMP_UPLOAD);
     }
 
-    const std::u16string root = StringUtils::UTF8toUTF16("/3ds/Checkpoint/");
-    Directory dir(Archive::sdmc(), root);
+    Directory dir(CHECKPOINT_ROOT);
     if (!dir.good()) {
         return;
     }
-    const std::string prefix = "transfer_send_";
-    const std::string suffix = ".zip";
     for (size_t i = 0, sz = dir.size(); i < sz; i++) {
         if (dir.folder(i)) {
             continue;
         }
-        std::string name = StringUtils::UTF16toUTF8(dir.entry(i));
-        if (name.size() > prefix.size() + suffix.size() && name.compare(0, prefix.size(), prefix) == 0 &&
-            name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
-            std::u16string path = root + dir.entry(i);
-            FSUSER_DeleteFile(Archive::sdmc(), fsMakePath(PATH_UTF16, path.data()));
+        std::string name = dir.entry(i);
+        if (name.size() > TEMP_SEND_PREFIX.size() + TEMP_SEND_SUFFIX.size() && name.compare(0, TEMP_SEND_PREFIX.size(), TEMP_SEND_PREFIX) == 0 &&
+            name.compare(name.size() - TEMP_SEND_SUFFIX.size(), TEMP_SEND_SUFFIX.size(), TEMP_SEND_SUFFIX) == 0) {
+            std::string path = std::string(CHECKPOINT_ROOT) + name;
+            std::remove(path.c_str());
             Logging::info("Removed leftover {} from a previous run.", name);
         }
     }
@@ -966,25 +937,25 @@ void Transfer::sweepTempFiles(void)
 
 bool Transfer::startReceiver(std::string& outError)
 {
-    if (!Server::isRunning()) {
-        outError = "HTTP server not available.";
-        return false;
-    }
-
     {
         std::lock_guard<std::mutex> lock(g_receiverMutex);
         if (g_receiverRunning) {
             return true;
         }
     }
+    if (Server::getAddress().empty()) {
+        outError = "HTTP server not available.";
+        return false;
+    }
 
-    srand((unsigned int)osGetTime());
+    srand((unsigned int)time(nullptr));
     int pin           = 1000 + (rand() % 9000);
     std::string token = StringUtils::format("%04d", pin);
     std::string ip    = Server::getAddress();
     setReceiverNotice("");
     setReceiverCompletedName("");
     g_receiverCompleted.store(false);
+    g_completedTitleId.store(0);
     size_t pos = ip.find("://");
     if (pos != std::string::npos) {
         ip = ip.substr(pos + 3);
@@ -1041,6 +1012,11 @@ bool Transfer::consumePendingRefresh(void)
     return g_pendingRefresh.exchange(false);
 }
 
+u64 Transfer::consumeCompletedTitleId(void)
+{
+    return g_completedTitleId.exchange(0);
+}
+
 std::string Transfer::receiverToken(void)
 {
     std::lock_guard<std::mutex> lock(g_receiverMutex);
@@ -1087,8 +1063,8 @@ void Transfer::clearReceiverCompletion(void)
     g_receiverCompleted.store(false);
 }
 
-Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16string& backupPath, const std::string& backupName,
-    const std::string& dataType, const std::string& ip, u16 port, const std::string& token)
+Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& backupPath, const std::string& backupName, const std::string& dataType,
+    const std::string& ip, u16 port, const std::string& token)
 {
     // Every exit path must clear the transfer modal; the scope guard makes
     // that hold for each early return below.
@@ -1098,16 +1074,16 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
 
     std::vector<FileEntry> files;
     std::vector<std::string> dirs;
-    collectFiles(Archive::sdmc(), backupPath, StringUtils::UTF8toUTF16(""), files, &dirs);
+    collectFiles(backupPath, "", files, &dirs);
     if (files.empty() && dirs.empty()) {
         return SendOutcome{false, SendStage::EmptyBackup, ""};
     }
 
     // Multi-file backups are zipped on the fly by sendZipStream — no staged
-    // temp zip on SD; the exact zip size is known upfront because entries are
+    // temp zip; the exact zip size is known upfront because entries are
     // store-only.
     bool isZip = files.size() != 1 || !dirs.empty();
-    std::u16string payloadPath;
+    std::string payloadPath;
     std::string payloadName;
     u32 payloadSize = 0;
 
@@ -1126,7 +1102,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
 
     nlohmann::json meta;
     meta["titleId"]        = StringUtils::format("%016llX", title.id());
-    meta["titleName"]      = title.shortDescription();
+    meta["titleName"]      = title.displayName();
     meta["dataType"]       = dataType;
     meta["backupName"]     = backupName;
     meta["isZip"]          = isZip;
@@ -1135,7 +1111,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
     meta["timestamp"]      = DateTime::logDateTime();
 
     std::string metaStr  = meta.dump();
-    std::string boundary = StringUtils::format("----checkpoint-boundary-%llu", (unsigned long long)osGetTime());
+    std::string boundary = StringUtils::format("----checkpoint-boundary-%llu", (unsigned long long)time(nullptr));
 
     std::string partMeta = "--" + boundary +
                            "\r\n"
@@ -1203,21 +1179,21 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
         }
     }
     else if (ok) {
-        FSStream input(Archive::sdmc(), payloadPath, FS_OPEN_READ);
-        if (!input.good()) {
+        FILE* input = fopen(payloadPath.c_str(), "rb");
+        if (input == nullptr) {
             ok = false;
         }
         else {
-            static const u32 kBuf = 0x40000;
+            static const size_t kBuf = 0x40000;
             std::unique_ptr<u8[]> buf(new u8[kBuf]);
-            while (!input.eof()) {
+            while (true) {
                 if (TransferStatus::cancelRequested()) {
-                    input.close();
+                    fclose(input);
                     // The scope guard closes the socket, dropping the connection,
                     // which the receiver treats as an aborted request.
                     return SendOutcome{false, SendStage::Cancelled, ""};
                 }
-                u32 rd = input.read(buf.get(), kBuf);
+                size_t rd = fread(buf.get(), 1, kBuf, input);
                 if (rd == 0) {
                     break;
                 }
@@ -1227,7 +1203,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
                 }
                 TransferStatus::addBytesDone(rd);
             }
-            input.close();
+            fclose(input);
         }
     }
 

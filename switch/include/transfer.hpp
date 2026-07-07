@@ -30,7 +30,12 @@
 #include "title.hpp"
 #include <optional>
 #include <string>
+#include <switch.h>
 
+// Wireless save transfer, ported from the 3DS build. The wire protocol is
+// identical (HTTP/1.1 multipart upload, store-only ZIP, X-CP-Token PIN), so the
+// PC CLI and a 3DS on the same network interoperate with the Switch. Switch has
+// no extdata: everything travels as dataType "save".
 namespace Transfer {
     // A parsed send destination. The screen only prompts for the raw "ip:port"
     // string and hands it here; validation policy lives with the transport.
@@ -47,14 +52,16 @@ namespace Transfer {
     bool validPin(const std::string& pin);
 
     // Deletes temp archives a previous crash/power-loss may have left behind:
-    // transfer_recv.zip and every transfer_send_*.zip under /3ds/Checkpoint/.
-    // Called once on boot; normal exits already clean these via scope guards.
+    // the received-package staging file and every transfer_send_*.zip under
+    // sdmc:/switch/Checkpoint/. Called once on boot; normal exits already clean
+    // these via scope guards.
     void sweepTempFiles(void);
 
     bool startReceiver(std::string& outError);
     void stopReceiver(void);
     bool receiverRunning(void);
     bool consumePendingRefresh(void);
+    u64 consumeCompletedTitleId(void);
     std::string receiverToken(void);
     std::string receiverIp(void);
     int receiverPort(void);
@@ -79,7 +86,7 @@ namespace Transfer {
 
     // Blocking; runs on the TransferJob worker. Progress flows through
     // TransferStatus (beginNetwork/addBytesDone) and is drawn by the main loop.
-    SendOutcome sendBackup(const Title& title, const std::u16string& backupPath, const std::string& backupName, const std::string& dataType,
+    SendOutcome sendBackup(Title& title, const std::string& backupPath, const std::string& backupName, const std::string& dataType,
         const std::string& ip, u16 port, const std::string& token);
 }
 

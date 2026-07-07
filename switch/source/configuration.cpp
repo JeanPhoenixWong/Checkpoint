@@ -67,6 +67,10 @@ Configuration::Configuration(void)
             mJson["ftp-enabled"] = false;
             updateJson           = true;
         }
+        if (!(mJson.contains("transfer-enabled") && mJson["transfer-enabled"].is_boolean())) {
+            mJson["transfer-enabled"] = false;
+            updateJson                = true;
+        }
         if (!(mJson.contains("confirm-restore") && mJson["confirm-restore"].is_boolean())) {
             mJson["confirm-restore"] = true; // default: confirm, matching prior always-confirm behavior
             updateJson               = true;
@@ -98,6 +102,10 @@ Configuration::Configuration(void)
         if (!(mJson.contains("language") && mJson["language"].is_string())) {
             mJson["language"] = "en";
             updateJson        = true;
+        }
+        if (!(mJson.contains("last-transfer-address") && mJson["last-transfer-address"].is_string())) {
+            mJson["last-transfer-address"] = "";
+            updateJson                     = true;
         }
         if (!(mJson.contains("sort-mode") && mJson["sort-mode"].is_string())) {
             mJson["sort-mode"] = SortMode::of(SORT_ALPHA).configKey;
@@ -250,14 +258,17 @@ void Configuration::parse(void)
 
     // parse FTP flag
     FTPEnabled = mJson["ftp-enabled"];
+    // parse wireless-transfer flag
+    mTransferEnabled = mJson.value("transfer-enabled", false);
     // parse confirm-restore flag
     mConfirmRestore = mJson.value("confirm-restore", true);
     // parse quick-backup flag
     mQuickBackup = mJson.value("quick-backup", false);
 
-    mTheme    = mJson.value("theme", "dark");
-    mLanguage = mJson.value("language", "en");
-    mSortMode = SortMode::fromConfigKey(mJson.value("sort-mode", std::string(SortMode::of(SORT_ALPHA).configKey)));
+    mTheme               = mJson.value("theme", "dark");
+    mLanguage            = mJson.value("language", "en");
+    mLastTransferAddress = mJson.value("last-transfer-address", std::string());
+    mSortMode            = SortMode::fromConfigKey(mJson.value("sort-mode", std::string(SortMode::of(SORT_ALPHA).configKey)));
 }
 
 bool Configuration::isFTPEnabled(void)
@@ -329,6 +340,18 @@ void Configuration::setFTPEnabled(bool enabled)
 {
     FTPEnabled           = enabled;
     mJson["ftp-enabled"] = enabled;
+    save();
+}
+
+bool Configuration::isTransferEnabled(void)
+{
+    return mTransferEnabled;
+}
+
+void Configuration::setTransferEnabled(bool enabled)
+{
+    mTransferEnabled          = enabled;
+    mJson["transfer-enabled"] = enabled;
     save();
 }
 
@@ -426,6 +449,18 @@ void Configuration::setLanguage(const std::string& language)
 {
     mLanguage         = language;
     mJson["language"] = language;
+    save();
+}
+
+std::string Configuration::lastTransferAddress(void)
+{
+    return mLastTransferAddress;
+}
+
+void Configuration::setLastTransferAddress(const std::string& address)
+{
+    mLastTransferAddress           = address;
+    mJson["last-transfer-address"] = address;
     save();
 }
 

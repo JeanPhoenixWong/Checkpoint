@@ -70,6 +70,12 @@ std::string OutcomeMessages::sendError(const Transfer::SendOutcome& outcome)
             return i18n::t("outcome.send_connect");
         case Transfer::SendStage::Response:
             return outcome.detail.empty() ? i18n::t("outcome.send_no_response") : i18n::t("outcome.send_receiver_error", {outcome.detail});
+        case Transfer::SendStage::Send:
+            // A receiver-side cancel just drops the connection, so the sender
+            // can't tell it apart from a genuine network failure.
+            return i18n::t("outcome.send_interrupted");
+        case Transfer::SendStage::Cancelled:
+            return i18n::t("transfer.cancelled");
         default:
             return i18n::t("outcome.send_failed");
     }

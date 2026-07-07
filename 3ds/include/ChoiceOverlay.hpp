@@ -37,7 +37,7 @@
 
 // Two-button modal: one prompt line, a left/right button pair, d-pad + touch
 // selection, A activates the highlighted button. Owns the whole chrome and the
-// update loop; YesNoOverlay and TransferMenuOverlay are just configurations.
+// update loop; YesNoOverlay is just a configuration.
 class ChoiceOverlay : public Overlay {
 public:
     // A button in hid-index order; `x` places it (ModalChrome::BTN_LEFT_X or

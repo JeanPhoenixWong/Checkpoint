@@ -25,12 +25,15 @@
  */
 
 #include "server.hpp"
+#include "i18n.hpp"
 #include "logging.hpp"
+#include "transferstatus.hpp"
 #include <switch.h>
 
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -63,10 +66,60 @@ namespace {
     Thread serverThread;
     bool threadValid = false;
 
+    // Cap on the header block alone (the body is streamed, so it isn't bounded by
+    // this). A client that never sends a header terminator can't grow us forever.
+    constexpr size_t MAX_HEADER_SIZE = 128 * 1024;
+    // Poll in short slices so a receive cancel is noticed within ~1s even when the
+    // sender has stalled; idleMs accumulates across empty slices to preserve the
+    // overall idle timeout.
+    constexpr int POLL_SLICE_MS = 1000;
+
     std::map<std::string, Server::HttpHandler> handlers;
-    // handlers is mutated from the main thread (register/unregister) while the
-    // worker thread looks handlers up, so guard it.
+    // Streaming upload handlers, keyed by path: {temp body file path, handler}.
+    std::map<std::string, std::pair<std::string, Server::UploadHandler>> uploadHandlers;
+    // handlers/uploadHandlers are mutated from the main thread (register/unregister)
+    // while the worker thread looks them up, so guard both.
     std::mutex handlersMutex;
+
+    // Blocks up to the idle timeout for readable data, polling in slices so a
+    // cancel request is seen promptly. Returns bytes read (>0), 0 on a clean close
+    // or idle timeout, or -1 on a cancel/poll error the caller should abandon on.
+    ssize_t pollRecv(s32 sock, char* buf, size_t len, int& idleMs, bool trackCancel)
+    {
+        while (true) {
+            if (trackCancel && TransferStatus::cancelRequested()) {
+                return -1;
+            }
+            struct pollfd pfd;
+            pfd.fd      = sock;
+            pfd.events  = POLLIN;
+            pfd.revents = 0;
+            int ready   = poll(&pfd, 1, POLL_SLICE_MS);
+            if (ready < 0) {
+                return -1;
+            }
+            if (ready == 0) {
+                idleMs += POLL_SLICE_MS;
+                if (idleMs >= RECV_TIMEOUT_MS) {
+                    return 0;
+                }
+                continue;
+            }
+            idleMs = 0;
+            return recv(sock, buf, len, 0);
+        }
+    }
+
+    void sendResponse(s32 clientSocket, const Server::HttpResponse& response)
+    {
+        std::string header = "HTTP/1.1 " + std::to_string(response.statusCode);
+        header += (response.statusCode == 200 ? " OK" : (response.statusCode == 404 ? " Not Found" : " Error"));
+        header += "\r\nContent-Type: " + response.contentType;
+        header += "\r\nContent-Length: " + std::to_string(response.body.length());
+        header += "\r\n\r\n";
+        send(clientSocket, header.c_str(), header.length(), 0);
+        send(clientSocket, response.body.c_str(), response.body.length(), 0);
+    }
 
     std::string extractPath(const std::string& request)
     {
@@ -101,65 +154,118 @@ namespace {
         return (size_t)strtoul(headers.substr(pos, end - pos).c_str(), nullptr, 10);
     }
 
-    std::string readRequest(s32 clientSocket, bool& outTooLarge)
+    // Streams the body of an upload request to `tmpPath`, tracking progress and
+    // honouring a receive cancel. `leftover` is the body bytes already read while
+    // parsing the header. Returns true when the full body was written.
+    bool streamBodyToFile(s32 clientSocket, const std::string& tmpPath, size_t contentLength, const char* leftover, size_t leftoverLen)
     {
-        outTooLarge = false;
-        std::string data;
-        data.reserve(4096);
-        // Heap-allocated: a large recv chunk means far fewer syscalls/appends,
-        // and it can't live on the worker's small stack.
-        constexpr size_t RECV_CHUNK = 32 * 1024;
-        std::vector<char> buffer(RECV_CHUNK);
-        size_t headerEnd     = std::string::npos;
-        size_t contentLength = 0;
-
-        while (true) {
-            struct pollfd pfd;
-            pfd.fd      = clientSocket;
-            pfd.events  = POLLIN;
-            pfd.revents = 0;
-            int ready   = poll(&pfd, 1, RECV_TIMEOUT_MS);
-            if (ready <= 0) {
-                break; // timed out or poll error: abandon this (stalled) request
-            }
-            ssize_t received = recv(clientSocket, buffer.data(), buffer.size(), 0);
-            if (received <= 0) {
-                break;
-            }
-            data.append(buffer.data(), received);
-
-            if (headerEnd == std::string::npos) {
-                if (data.size() > MAX_REQUEST_SIZE) {
-                    outTooLarge = true;
-                    break;
-                }
-                headerEnd = data.find("\r\n\r\n");
-                if (headerEnd != std::string::npos) {
-                    contentLength = parseContentLength(data.substr(0, headerEnd));
-                    if (contentLength > MAX_REQUEST_SIZE) {
-                        outTooLarge = true;
-                        break;
-                    }
-                    if (contentLength == 0) {
-                        break;
-                    }
-                    data.reserve(headerEnd + 4 + contentLength);
-                }
-            }
-
-            if (headerEnd != std::string::npos && data.size() >= headerEnd + 4 + contentLength) {
-                break;
-            }
+        FILE* out = fopen(tmpPath.c_str(), "wb");
+        if (out == nullptr) {
+            Logging::error("Failed to open upload temp file {} with errno {}.", tmpPath, errno);
+            return false;
         }
 
-        return data;
+        TransferStatus::beginNetwork(i18n::t("transfer.downloading"), contentLength);
+
+        size_t written = 0;
+        if (leftoverLen > 0) {
+            size_t toWrite = leftoverLen > contentLength ? contentLength : leftoverLen;
+            fwrite(leftover, 1, toWrite, out);
+            written += toWrite;
+            TransferStatus::setBytesDone(written);
+        }
+
+        constexpr size_t RECV_CHUNK = 64 * 1024;
+        std::vector<char> buffer(RECV_CHUNK);
+        int idleMs = 0;
+        bool ok    = true;
+        while (written < contentLength) {
+            ssize_t received = pollRecv(clientSocket, buffer.data(), buffer.size(), idleMs, true);
+            if (received <= 0) {
+                ok = false; // clean close, idle timeout, or cancel: incomplete body
+                break;
+            }
+            size_t toWrite = (size_t)received;
+            if (written + toWrite > contentLength) {
+                toWrite = contentLength - written;
+            }
+            fwrite(buffer.data(), 1, toWrite, out);
+            written += toWrite;
+            TransferStatus::setBytesDone(written);
+        }
+
+        fclose(out);
+        return ok && written == contentLength;
     }
 
     void handleHttpRequest(s32 clientSocket)
     {
-        bool tooLarge       = false;
-        std::string request = readRequest(clientSocket, tooLarge);
-        if (tooLarge) {
+        // Read only up to and including the header terminator; the body is either
+        // streamed to disk (upload paths) or read into RAM afterwards (others).
+        std::string data;
+        data.reserve(4096);
+        constexpr size_t RECV_CHUNK = 64 * 1024;
+        std::vector<char> buffer(RECV_CHUNK);
+        size_t headerEnd = std::string::npos;
+        int idleMs       = 0;
+
+        while (true) {
+            ssize_t received = pollRecv(clientSocket, buffer.data(), buffer.size(), idleMs, false);
+            if (received <= 0) {
+                break;
+            }
+            data.append(buffer.data(), received);
+            headerEnd = data.find("\r\n\r\n");
+            if (headerEnd != std::string::npos) {
+                break;
+            }
+            if (data.size() > MAX_HEADER_SIZE) {
+                break; // no terminator within the cap: abandon
+            }
+        }
+        if (headerEnd == std::string::npos) {
+            return; // never got a complete header block
+        }
+
+        std::string headers  = data.substr(0, headerEnd);
+        std::string path     = extractPath(headers);
+        size_t contentLength = parseContentLength(headers);
+        size_t bodyStart     = headerEnd + 4;
+
+        // Streaming upload path.
+        std::string tmpPath;
+        Server::UploadHandler uploadHandler;
+        bool isUpload = false;
+        {
+            std::lock_guard<std::mutex> lock(handlersMutex);
+            auto it = uploadHandlers.find(path);
+            if (it != uploadHandlers.end()) {
+                tmpPath       = it->second.first;
+                uploadHandler = it->second.second;
+                isUpload      = true;
+            }
+        }
+        if (isUpload) {
+            const char* leftover = data.data() + bodyStart;
+            size_t leftoverLen   = data.size() - bodyStart;
+            bool complete        = streamBodyToFile(clientSocket, tmpPath, contentLength, leftover, leftoverLen);
+            if (!complete) {
+                // Cancelled, stalled, or dropped mid-upload: drop the request and
+                // clear the transfer UI; the handler never runs on a partial body.
+                std::remove(tmpPath.c_str());
+                TransferStatus::end();
+                Logging::info("Upload to {} abandoned before the full body arrived.", path);
+                return;
+            }
+            Server::UploadRequest req{headers, tmpPath, (uint64_t)contentLength};
+            Server::HttpResponse response = uploadHandler(req);
+            std::remove(tmpPath.c_str());
+            sendResponse(clientSocket, response);
+            return;
+        }
+
+        // Non-upload request: buffer the (small) remainder in RAM.
+        if (contentLength > MAX_REQUEST_SIZE) {
             std::string body = "{\"ok\":false,\"error\":\"Payload too large\"}";
             std::string header =
                 "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.length()) + "\r\n\r\n";
@@ -167,8 +273,14 @@ namespace {
             send(clientSocket, body.c_str(), body.length(), 0);
             return;
         }
+        while (data.size() < bodyStart + contentLength) {
+            ssize_t received = pollRecv(clientSocket, buffer.data(), buffer.size(), idleMs, false);
+            if (received <= 0) {
+                break;
+            }
+            data.append(buffer.data(), received);
+        }
 
-        std::string path = extractPath(request);
         Server::HttpHandler handler;
         bool found = false;
         {
@@ -180,14 +292,8 @@ namespace {
             }
         }
         if (found) {
-            Server::HttpResponse response = handler(path, request);
-            std::string header            = "HTTP/1.1 " + std::to_string(response.statusCode);
-            header += (response.statusCode == 200 ? " OK" : (response.statusCode == 404 ? " Not Found" : " Error"));
-            header += "\r\nContent-Type: " + response.contentType;
-            header += "\r\nContent-Length: " + std::to_string(response.body.length());
-            header += "\r\n\r\n";
-            send(clientSocket, header.c_str(), header.length(), 0);
-            send(clientSocket, response.body.c_str(), response.body.length(), 0);
+            Server::HttpResponse response = handler(path, data);
+            sendResponse(clientSocket, response);
         }
         else {
             std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -227,6 +333,30 @@ void Server::registerHandler(const std::string& path, Server::HttpHandler handle
         handlers[path] = handler;
     }
     Logging::info("Registered HTTP handler for path {}", path);
+}
+
+void Server::unregisterHandler(const std::string& path)
+{
+    {
+        std::lock_guard<std::mutex> lock(handlersMutex);
+        handlers.erase(path);
+        uploadHandlers.erase(path);
+    }
+    Logging::info("Unregistered HTTP handler for path {}", path);
+}
+
+void Server::registerUploadHandler(const std::string& path, const std::string& tmpPath, Server::UploadHandler handler)
+{
+    {
+        std::lock_guard<std::mutex> lock(handlersMutex);
+        uploadHandlers[path] = {tmpPath, handler};
+    }
+    Logging::info("Registered upload handler for path {}", path);
+}
+
+bool Server::isRunning(void)
+{
+    return serverIsRunning.load();
 }
 
 std::string Server::getAddress(void)
@@ -299,6 +429,7 @@ void Server::exit()
     {
         std::lock_guard<std::mutex> lock(handlersMutex);
         handlers.clear();
+        uploadHandlers.clear();
     }
 
     Logging::trace("Log server stopped");

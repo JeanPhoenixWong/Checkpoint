@@ -1,6 +1,6 @@
 /*
  *   This file is part of Checkpoint
- *   Copyright (C) 2017-2025 Bernardo Giordano, FlagBrew
+ *   Copyright (C) 2017-2026 Bernardo Giordano, FlagBrew
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -24,36 +24,27 @@
  *         reasonable ways as different from the original version.
  */
 
-#ifndef GUI_HPP
-#define GUI_HPP
+#ifndef RECEIVEOVERLAY_HPP
+#define RECEIVEOVERLAY_HPP
 
-#include "colors.hpp"
-#include "main.hpp"
-#include "sprites.h"
-#include <citro2d.h>
-#include <string>
+#include "Overlay.hpp"
 
-inline C3D_RenderTarget* g_top;
-inline C3D_RenderTarget* g_bottom;
+// Shows the wireless receiver's IP/port/PIN, live download progress, and the
+// completion notice. Receiver lifetime == overlay lifetime: MainScreen starts
+// the receiver before constructing this, and this stops it on close (B, or A
+// after a completed transfer). While an upload is in flight B is captured as a
+// hold-to-cancel instead of a close, so the receiver stays registered until the
+// server thread has abandoned the request. Mirrors the 3DS ReceiveOverlay.
+class ReceiveOverlay : public Overlay {
+public:
+    explicit ReceiveOverlay(Screen& screen) : Overlay(screen) {}
+    ~ReceiveOverlay() = default;
+    void draw(void) const override;
+    void update(const InputState&) override;
 
-inline C2D_SpriteSheet spritesheet;
-inline C2D_Image flag;
-inline C2D_Sprite checkbox, star;
-
-namespace Gui {
-    void init(void);
-    void exit(void);
-    void frameEnd(void);
-
-    void drawPulsingOutline(u32 x, u32 y, u16 w, u16 h, u8 size, u32 color);
-    void drawOutline(u32 x, u32 y, u16 w, u16 h, u8 size, u32 color);
-
-    // Filled progress bar with a caption beneath it (left label faint, right label
-    // right-aligned in the text colour), matching the backup/restore modal bars.
-    // `frac` is clamped to [0, 1].
-    void drawProgressBar(float x, float y, float w, float h, float frac, const std::string& leftLabel, const std::string& rightLabel);
-
-    C2D_Image noIcon(void);
-}
+private:
+    void closeReceiver(void);
+    int mCancelHoldFrames = 0;
+};
 
 #endif
