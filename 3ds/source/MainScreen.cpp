@@ -931,7 +931,7 @@ void MainScreen::startTransferSend(void)
     std::string backupName    = nameFromCell(cellIndex);
     std::u16string backupPath = target.fullPath(cellIndex);
 
-    std::string ipPort = KeyboardManager::get().text("", i18n::t("main.receiver_ip_port"), 32);
+    std::string ipPort = KeyboardManager::get().text(Configuration::getInstance().lastTransferAddress(), i18n::t("main.receiver_ip_port"), 32);
     if (ipPort.empty()) {
         return;
     }
@@ -940,6 +940,8 @@ void MainScreen::startTransferSend(void)
         currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.invalid_ip_port"));
         return;
     }
+    // Remember a valid address so the next send prefills the keyboard with it.
+    Configuration::getInstance().setLastTransferAddress(ipPort);
 
     std::string pin = KeyboardManager::get().text("1234", i18n::t("main.pin_prompt"), 5);
     if (pin.empty()) {

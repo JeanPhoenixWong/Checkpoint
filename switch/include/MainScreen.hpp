@@ -89,10 +89,10 @@ private:
     Hid<HidDirection::HORIZONTAL, HidDirection::HORIZONTAL> hid;
     std::unique_ptr<BackupList> backupList;
     std::unique_ptr<Clickable> buttonBackup, buttonRestore;
-    // Wireless transfer touch buttons (drawn/handled only when the transfer
-    // setting is on). Receive is always available; Send lights up only when an
-    // existing backup is selected.
-    std::unique_ptr<Clickable> buttonSend, buttonReceive;
+    // Wireless Send touch button (drawn/handled only when the transfer setting is
+    // on), stacked above Backup and lit only when an existing backup is selected.
+    // Receive is a row inside the backup list, not a button.
+    std::unique_ptr<Clickable> buttonSend;
     // Frames B has been held to cancel an in-flight network send (parity with the
     // 45-frame threshold used by ReceiveOverlay).
     int mCancelHoldFrames = 0;

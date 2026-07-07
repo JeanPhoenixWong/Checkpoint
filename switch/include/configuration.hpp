@@ -104,6 +104,11 @@ public:
     std::string language(void);
     void setLanguage(const std::string& language);
 
+    // Last "ip:port" entered in the wireless-transfer send prompt. Prefilled into
+    // the keyboard next time; not surfaced in Settings. Empty until the first send.
+    std::string lastTransferAddress(void);
+    void setLastTransferAddress(const std::string& address);
+
     // Default/current title-grid sort mode. Persisted so it survives a
     // relaunch; the grid's X-button cycle and the Settings "Default sort"
     // spinner both read/write this same setting through TitleCatalog.
@@ -135,6 +140,7 @@ private:
     std::unordered_map<u64, std::vector<std::string>> mAdditionalSaveFolders, mAdditionalDeviceSaveFolders;
     std::string mTheme;
     std::string mLanguage;
+    std::string mLastTransferAddress; // last "ip:port" sent to; prefills the send keyboard
     sort_t mSortMode;
 };
 

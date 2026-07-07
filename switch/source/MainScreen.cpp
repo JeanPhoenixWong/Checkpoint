@@ -84,11 +84,10 @@ namespace {
     constexpr int BTN_RESTORE_Y = 598;
     constexpr int LIST_Y        = 214;
     constexpr int LIST_ROWS     = 5;
-    // Wireless transfer row: two half-width buttons (Receive | Send) above the
-    // Backup button.
+    // Wireless Send button: a full-width button stacked above Backup, in the slot
+    // the list gives up (it shows one row fewer) when transfer is enabled. Receive
+    // is a row inside the backup list, not a button here.
     constexpr int BTN_TRANSFER_Y = 466;
-    constexpr int BTN_HALF_W     = (BTN_W - 12) / 2;
-    constexpr int BTN_SEND_X     = COL_X + BTN_HALF_W + 12;
 
     std::string backupErrorMessage(io::BackupStage stage)
     {
@@ -140,19 +139,24 @@ namespace {
     // An action button: filled accent (Backup/Send) or outlined
     // (Restore/Receive), label + the shoulder-key system glyph centered as a
     // group. An empty `key` draws the label alone (the wireless buttons are
-    // touch-only — every face/shoulder button is already bound).
-    void drawActionButton(int x, int y, const std::string& label, const std::string& key, bool filled, int w = BTN_W)
+    // touch-only — every face/shoulder button is already bound). `enabled` false
+    // greys the button out (faint fill, muted text) for a shown-but-inactive
+    // action, e.g. Send while a non-sendable row is highlighted.
+    void drawActionButton(int x, int y, const std::string& label, const std::string& key, bool filled, int w = BTN_W, bool enabled = true)
     {
         // Square buttons (radius 0), matching the 3DS action buttons and the
         // squared rail / rows.
-        if (filled) {
+        if (!enabled) {
+            Shapes::fillRound(x, y, w, BTN_H, 0, COLOR_FILL1);
+        }
+        else if (filled) {
             Shapes::fillRound(x, y, w, BTN_H, 0, COLOR_ACCENT);
         }
         else {
             Shapes::strokeRound(x, y, w, BTN_H, 0, 2, COLOR_STROKE3);
         }
 
-        const Color fg = filled ? COLOR_WHITE : COLOR_TEXT;
+        const Color fg = !enabled ? COLOR_TEXT3 : (filled ? COLOR_WHITE : COLOR_TEXT);
 
         u32 lw, lh;
         Gfx::GetTextDimensions(16, label.c_str(), &lw, &lh);
@@ -203,10 +207,10 @@ MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, i
     backupList    = std::make_unique<BackupList>(COL_X, LIST_Y, COL_W, LIST_ROWS * BackupList::ROW_PITCH, LIST_ROWS);
     buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup"), true);
     buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("main.restore"), true);
-    buttonReceive =
-        std::make_unique<Clickable>(COL_X, BTN_TRANSFER_Y, BTN_HALF_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("transfer.receive"), true);
-    buttonSend =
-        std::make_unique<Clickable>(BTN_SEND_X, BTN_TRANSFER_Y, BTN_HALF_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("transfer.send"), true);
+    // Send is a full-width button stacked above Backup (Receive now lives inside
+    // the backup list, mirroring the 3DS layout). Contextual: only shown when an
+    // existing backup is highlighted.
+    buttonSend = std::make_unique<Clickable>(COL_X, BTN_TRANSFER_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("transfer.send"), true);
 
     // The rail Clickables exist only so released() can hit-test touches; the
     // rail is drawn by drawRailItem, not by Clickable::draw.
@@ -410,6 +414,14 @@ void MainScreen::draw() const
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
+            // Send sits above Backup/Restore. Always shown in its slot, but greyed
+            // (disabled) unless a highlighted existing backup can be sent — i.e.
+            // it stays inactive while the "New..." or "Receive" rows are hovered
+            // (touch-only: every face/shoulder button is bound).
+            if (Configuration::getInstance().isTransferEnabled()) {
+                const bool sendCtx = backupScrollEnabled && backupList->index() != 0 && !backupList->isReceiveRow(backupList->index());
+                drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "", sendCtx, BTN_W, sendCtx);
+            }
             drawActionButton(COL_X, BTN_BACKUP_Y, i18n::t("main.backup"), "L", true);
             drawActionButton(COL_X, BTN_RESTORE_Y, i18n::t("main.restore"), "R", false);
         }
@@ -419,18 +431,6 @@ void MainScreen::draw() const
         u32 emptyW, emptyH;
         Gfx::GetTextDimensions(18, emptyMsg.c_str(), &emptyW, &emptyH);
         Gfx::DrawText(18, GRID_AREA_X + (GRID_AREA_W - (int)emptyW) / 2, (720 - (int)emptyH) / 2, COLOR_TEXT2, emptyMsg.c_str());
-    }
-
-    // ---- Wireless transfer buttons ----
-    // Receive is global (works regardless of the selected title); Send lights up
-    // only when an existing backup is highlighted in the list. Touch-only: every
-    // face/shoulder button is already bound.
-    if (Configuration::getInstance().isTransferEnabled()) {
-        drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.receive"), "", false, BTN_HALF_W);
-        if (filteredCnt > 0 && !MS::multipleSelectionEnabled()) {
-            const bool sendCtx = backupScrollEnabled && backupList->index() != 0;
-            drawActionButton(BTN_SEND_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "", sendCtx, BTN_HALF_W);
-        }
     }
 
     // ---- Hint bar ----
@@ -731,13 +731,13 @@ void MainScreen::requestRestoreSelected(void)
         currentOverlay = std::make_shared<YesNoOverlay>(
             *this, i18n::t("main.confirm_restore"),
             [this]() {
-                doRestore(rawIndex(), this->index(CELLS));
+                doRestore(rawIndex(), backupList->rowToCell(this->index(CELLS)));
                 TransferJob::get().start();
             },
             [this]() { this->removeOverlay(); });
     }
     else {
-        doRestore(rawIndex(), this->index(CELLS));
+        doRestore(rawIndex(), backupList->rowToCell(this->index(CELLS)));
         TransferJob::get().start();
     }
 }
@@ -829,10 +829,15 @@ void MainScreen::handleEvents(const InputState& input)
     if ((kdown & HidNpadButton_A) && TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter) > 0) {
         // If backup list is active...
         if (backupScrollEnabled) {
-            // If the "New..." entry is selected...
-            if (0 == this->index(CELLS)) {
-                doBackup(rawIndex(), this->index(CELLS));
+            const size_t row = this->index(CELLS);
+            // "New..." row → backup; the wireless "Receive" row → start receiver;
+            // any existing backup row → restore.
+            if (0 == row) {
+                doBackup(rawIndex(), 0);
                 TransferJob::get().start();
+            }
+            else if (backupList->isReceiveRow(row)) {
+                startTransferReceive();
             }
             else {
                 requestRestoreSelected();
@@ -859,14 +864,15 @@ void MainScreen::handleEvents(const InputState& input)
     // Handle pressing X
     if (kdown & HidNpadButton_X) {
         if (backupScrollEnabled) {
-            size_t index = this->index(CELLS);
-            if (index > 0) {
-                currentOverlay = std::make_shared<YesNoOverlay>(
+            size_t index = this->index(CELLS); // display row
+            if (index > 0 && !backupList->isReceiveRow(index)) {
+                const size_t cell = backupList->rowToCell(index);
+                currentOverlay    = std::make_shared<YesNoOverlay>(
                     *this, i18n::t("main.confirm_delete"),
-                    [this, index]() {
+                    [this, index, cell]() {
                         Title title;
                         TitleCatalog::get().getTitle(title, g_currentUId, rawIndex());
-                        std::string path = title.fullPath(index);
+                        std::string path = title.fullPath(cell);
                         io::deleteFolderRecursively((path + "/").c_str());
                         TitleCatalog::get().refreshDirectories(title.id());
                         BackupSizeCache::get().invalidate(title.id()); // a backup was removed
@@ -929,11 +935,11 @@ void MainScreen::handleEvents(const InputState& input)
             TransferJob::get().start();
             MS::clearSelectedEntries();
         }
-        else if (backupScrollEnabled) {
+        else if (backupScrollEnabled && !backupList->isReceiveRow(this->index(CELLS))) {
             currentOverlay = std::make_shared<YesNoOverlay>(
                 *this, i18n::t("main.confirm_backup_save"),
                 [this]() {
-                    doBackup(rawIndex(), this->index(CELLS));
+                    doBackup(rawIndex(), backupList->rowToCell(this->index(CELLS)));
                     TransferJob::get().start();
                 },
                 [this]() { this->removeOverlay(); });
@@ -943,21 +949,19 @@ void MainScreen::handleEvents(const InputState& input)
     // Handle pressing/touching R
     if (buttonRestore->released() || (kdown & HidNpadButton_R)) {
         if (backupScrollEnabled) {
-            if (this->index(CELLS) != 0) {
+            if (this->index(CELLS) != 0 && !backupList->isReceiveRow(this->index(CELLS))) {
                 requestRestoreSelected();
             }
         }
     }
 
-    // Wireless transfer touch buttons (gated behind the setting). Receive is
-    // global; Send fires only when an existing backup is highlighted, so the
-    // "select a backup first" info box never appears.
+    // Wireless Send touch button (gated behind the setting). Receive is now a row
+    // inside the backup list (handled by the A/touch path above). Send fires only
+    // when an existing backup is highlighted, so the "select a backup first" info
+    // box never appears.
     if (Configuration::getInstance().isTransferEnabled()) {
-        if (buttonReceive->released()) {
-            startTransferReceive();
-            return;
-        }
-        if (backupScrollEnabled && this->index(CELLS) != 0 && buttonSend->released()) {
+        const size_t row = this->index(CELLS);
+        if (backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row) && buttonSend->released()) {
             startTransferSend();
             return;
         }
@@ -979,7 +983,8 @@ void MainScreen::startTransferReceive(void)
 
 void MainScreen::startTransferSend(void)
 {
-    if (!backupScrollEnabled || this->index(CELLS) == 0) {
+    const size_t row = this->index(CELLS);
+    if (!backupScrollEnabled || row == 0 || backupList->isReceiveRow(row)) {
         return; // contextual: only a highlighted existing backup can be sent
     }
     if (!KeyboardManager::get().isSystemKeyboardAvailable().first) {
@@ -987,7 +992,7 @@ void MainScreen::startTransferSend(void)
         return;
     }
 
-    const size_t cellIndex = this->index(CELLS);
+    const size_t cellIndex = backupList->rowToCell(row);
     Title title;
     TitleCatalog::get().getTitle(title, g_currentUId, rawIndex());
     std::string backupName = nameFromCell(cellIndex);
@@ -995,7 +1000,8 @@ void MainScreen::startTransferSend(void)
 
     // Keyboard + validation on the UI thread; the blocking zip + socket IO runs
     // on the TransferJob worker.
-    std::pair<bool, std::string> ipResp = KeyboardManager::get().keyboard("192.168.0.10:8000");
+    std::string lastAddress             = Configuration::getInstance().lastTransferAddress();
+    std::pair<bool, std::string> ipResp = KeyboardManager::get().keyboard(lastAddress.empty() ? "192.168.0.10:8000" : lastAddress);
     if (!ipResp.first || ipResp.second.empty()) {
         return;
     }
@@ -1004,6 +1010,8 @@ void MainScreen::startTransferSend(void)
         currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("main.invalid_ip_port"));
         return;
     }
+    // Remember a valid address so the next send prefills the keyboard with it.
+    Configuration::getInstance().setLastTransferAddress(ipResp.second);
 
     std::pair<bool, std::string> pinResp = KeyboardManager::get().keyboard("1234");
     if (!pinResp.first || pinResp.second.empty()) {

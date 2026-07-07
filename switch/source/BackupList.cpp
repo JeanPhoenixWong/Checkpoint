@@ -43,14 +43,15 @@ namespace {
     constexpr u64 REPEAT_DELAY_TICKS = 3000000;
 }
 
-BackupList::BackupList(int x, int y, int w, int h, size_t visibleRows) : mListX(x), mListY(y), mListW(w), mVisibleRows(visibleRows)
+BackupList::BackupList(int x, int y, int w, int h, size_t visibleRows)
+    : mListX(x), mListY(y), mListW(w), mBaseVisibleRows(visibleRows), mVisibleRows(visibleRows)
 {
     (void)h; // row geometry is derived from ROW_PITCH, not the passed pixel height
 }
 
 void BackupList::clampCursor(void)
 {
-    const size_t count = mNames.size();
+    const size_t count = displayCount();
     if (count == 0) {
         mIndex  = 0;
         mOffset = 0;
@@ -73,7 +74,7 @@ void BackupList::clampCursor(void)
 
 void BackupList::updateSelection(void)
 {
-    const size_t count = mNames.size();
+    const size_t count = displayCount();
     if (count == 0) {
         return;
     }
@@ -118,14 +119,25 @@ void BackupList::updateSelection(void)
 void BackupList::refreshSelected(AccountUid uid, saveTypeFilter_t filter, size_t filteredIdx, u32 catalogGen)
 {
     const u32 sizeGen = BackupSizeCache::get().generation();
-    if (mValid && mUid == uid && mFilter == filter && mFilteredIdx == filteredIdx && mCatalogGen == catalogGen && mSizeGen == sizeGen) {
+    // The wireless "Receive" row is gated behind the transfer setting; fold it
+    // into the change check so toggling the feature (in Settings) re-lays out the
+    // list even when nothing else moved.
+    const bool xfer = Configuration::getInstance().isTransferEnabled();
+    if (mValid && mUid == uid && mFilter == filter && mFilteredIdx == filteredIdx && mCatalogGen == catalogGen && mSizeGen == sizeGen &&
+        mHasReceiveRow == xfer) {
         return; // cached title/rows still describe what is on screen
     }
 
     // A bumped size generation (an async walk landed, or an invalidation) means
     // only the size labels changed: keep the resolved title and scroll position,
     // just re-pull the sizes. flush() preserves the Scrollable index.
-    const bool sizesOnly = mValid && mUid == uid && mFilter == filter && mFilteredIdx == filteredIdx && mCatalogGen == catalogGen;
+    const bool sizesOnly =
+        mValid && mUid == uid && mFilter == filter && mFilteredIdx == filteredIdx && mCatalogGen == catalogGen && mHasReceiveRow == xfer;
+
+    // One row narrower while transfer is on, leaving room for the stacked Send
+    // button below the list (mirrors the 3DS layout).
+    mHasReceiveRow = xfer;
+    mVisibleRows   = xfer && mBaseVisibleRows > 1 ? mBaseVisibleRows - 1 : mBaseVisibleRows;
 
     mUid         = uid;
     mFilter      = filter;
@@ -202,7 +214,7 @@ namespace {
 
 void BackupList::draw(bool focused)
 {
-    const size_t total = mNames.size();
+    const size_t total = displayCount();
     const size_t last  = std::min(mOffset + mVisibleRows, total);
 
     for (size_t i = mOffset; i < last; i++) {
@@ -212,12 +224,14 @@ void BackupList::draw(bool focused)
         // Rectangular rows (radius 0) to match the 3DS list and the squared buttons.
         Shapes::fillRound(mListX, ry, mListW, ROW_H, 0, cur ? COLOR_ACCENT_TINT : COLOR_FILL1);
 
-        if (i == 0) {
-            // The synthetic "New..." entry, rendered as the create-backup row.
+        if (i == 0 || isReceiveRow(i)) {
+            // Action rows: the synthetic "New..." create-backup row and, when
+            // wireless transfer is on, the "Receive" row (both share the accent
+            // styling the 3DS action rows use).
             u32 th;
-            std::string newLbl = i18n::t("main.new_backup");
-            Gfx::GetTextDimensions(14, newLbl.c_str(), NULL, &th);
-            Gfx::DrawText(14, mListX + 16, ry + (ROW_H - (int)th) / 2, COLOR_ACCENT_LIGHT, (" " + newLbl).c_str());
+            std::string label = i18n::t(i == 0 ? "main.new_backup" : "transfer.receive");
+            Gfx::GetTextDimensions(14, label.c_str(), NULL, &th);
+            Gfx::DrawText(14, mListX + 16, ry + (ROW_H - (int)th) / 2, COLOR_ACCENT_LIGHT, (" " + label).c_str());
             // The breathing ring must reach the "New backup" row too.
             if (cur) {
                 Shapes::focusRing(mListX, ry, mListW, ROW_H, 0, COLOR_ACCENT);
@@ -228,14 +242,16 @@ void BackupList::draw(bool focused)
         // The folder name is "YYYYMMDD-HHMMSS[ username]"; show only the
         // timestamp on the left and the folder's on-disk size on the right (the
         // trailing username is dropped — the size is the useful per-row fact).
+        // An existing backup: translate the on-screen row to its cell (saves) index.
+        const size_t cell = rowToCell(i);
         std::string name, chip;
-        splitBackupName(mNames[i], name, chip);
+        splitBackupName(mNames[cell], name, chip);
 
         u32 nameH;
         Gfx::GetTextDimensions(13, name.c_str(), NULL, &nameH, FontFamily::Mono);
         Gfx::DrawText(13, mListX + 16, ry + (ROW_H - (int)nameH) / 2, cur ? COLOR_TEXT : COLOR_MONO_VAL, name.c_str(), FontFamily::Mono);
 
-        std::string sizeStr = i < mSizes.size() ? mSizes[i] : std::string();
+        std::string sizeStr = cell < mSizes.size() ? mSizes[cell] : std::string();
         if (!sizeStr.empty()) {
             u32 sw, sh;
             Gfx::GetTextDimensions(12, sizeStr.c_str(), &sw, &sh, FontFamily::Mono);
