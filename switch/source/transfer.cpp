@@ -34,6 +34,7 @@
 #include "titlecatalog.hpp"
 #include "transferstatus.hpp"
 #include <algorithm>
+#include <arm_acle.h>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cctype>
@@ -96,29 +97,22 @@ namespace {
         bool isDirectory;
     };
 
-    u32 crcTable[256];
-    bool crcInit = false;
-
-    void initCrc(void)
-    {
-        if (crcInit) {
-            return;
-        }
-        for (u32 i = 0; i < 256; ++i) {
-            u32 c = i;
-            for (int j = 0; j < 8; ++j) {
-                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-            }
-            crcTable[i] = c;
-        }
-        crcInit = true;
-    }
-
+    // Hardware CRC32 (the ZIP/zlib polynomial, not CRC32C): the whole target
+    // already builds with -march=armv8-a+crc, so the checksum is effectively
+    // free instead of a bytewise table loop.
     u32 updateCrc(u32 crc, const u8* data, size_t len)
     {
         u32 c = crc;
-        for (size_t i = 0; i < len; ++i) {
-            c = crcTable[(c ^ data[i]) & 0xFFu] ^ (c >> 8);
+        while (len >= 8) {
+            u64 v;
+            std::memcpy(&v, data, 8);
+            c = __crc32d(c, v);
+            data += 8;
+            len -= 8;
+        }
+        while (len > 0) {
+            c = __crc32b(c, *data++);
+            len--;
         }
         return c;
     }
@@ -166,183 +160,36 @@ namespace {
         }
     }
 
-    u32 totalFileBytes(const std::vector<FileEntry>& files)
+    void appendLe16(std::string& out, u16 v)
     {
-        u32 total = 0;
-        for (const auto& entry : files) {
-            total += entry.size;
-        }
-        return total;
+        out.push_back((char)(v & 0xFF));
+        out.push_back((char)((v >> 8) & 0xFF));
     }
 
-    void writeLe16(FILE* out, u16 v)
+    void appendLe32(std::string& out, u32 v)
     {
-        u8 b[2] = {(u8)(v & 0xFF), (u8)((v >> 8) & 0xFF)};
-        fwrite(b, 1, 2, out);
+        out.push_back((char)(v & 0xFF));
+        out.push_back((char)((v >> 8) & 0xFF));
+        out.push_back((char)((v >> 16) & 0xFF));
+        out.push_back((char)((v >> 24) & 0xFF));
     }
 
-    void writeLe32(FILE* out, u32 v)
+    // Exact byte size of the ZIP produced by sendZipStream. Store-only entries
+    // make it fully deterministic, which is what lets the zip be streamed
+    // straight into the socket with a correct Content-Length and no staged
+    // temp file on the SD card.
+    u32 zipStreamSize(const std::vector<FileEntry>& files, const std::vector<std::string>& dirs)
     {
-        u8 b[4] = {(u8)(v & 0xFF), (u8)((v >> 8) & 0xFF), (u8)((v >> 16) & 0xFF), (u8)((v >> 24) & 0xFF)};
-        fwrite(b, 1, 4, out);
-    }
-
-    // Writes a store-only (method 0), no-data-descriptor, no-zip64 ZIP mirroring
-    // the 3DS writer, so the receiver's extractZip and the PC CLI accept it. The
-    // CRC of each file is backfilled into its local header after the single
-    // streaming pass, so each file is read from disk only once.
-    bool writeZip(const std::string& root, const std::string& zipPath, u32& outZipSize, std::string& outError)
-    {
-        std::vector<FileEntry> files;
-        std::vector<std::string> dirs;
-        collectFiles(root, "", files, &dirs);
-        if (files.empty() && dirs.empty()) {
-            outError = "No files or folders found to package.";
-            return false;
-        }
-
         u32 total = 22; // end of central directory
         for (const auto& dir : dirs) {
-            total += 30 + dir.size();
-            total += 46 + dir.size();
+            total += 30 + dir.size(); // local header
+            total += 46 + dir.size(); // central directory
         }
         for (const auto& entry : files) {
-            total += 30 + entry.relPath.size() + entry.size;
-            total += 46 + entry.relPath.size();
+            total += 30 + entry.relPath.size() + entry.size + 16; // local header + data + data descriptor
+            total += 46 + entry.relPath.size();                   // central directory
         }
-        outZipSize = total;
-
-        FILE* output = fopen(zipPath.c_str(), "wb");
-        if (output == nullptr) {
-            outError = StringUtils::format("Cannot create package file (errno %d).", errno);
-            return false;
-        }
-
-        std::vector<ZipEntry> central;
-        central.reserve(dirs.size() + files.size());
-
-        static const size_t kBuf = 0x8000;
-        std::unique_ptr<u8[]> buf(new u8[kBuf]);
-        initCrc();
-
-        for (const auto& dir : dirs) {
-            ZipEntry centralEntry;
-            centralEntry.name        = dir;
-            centralEntry.crc         = 0;
-            centralEntry.size        = 0;
-            centralEntry.offset      = (u32)ftell(output);
-            centralEntry.isDirectory = true;
-
-            writeLe32(output, 0x04034b50);
-            writeLe16(output, 20);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe32(output, 0);
-            writeLe32(output, 0);
-            writeLe32(output, 0);
-            writeLe16(output, (u16)dir.size());
-            writeLe16(output, 0);
-            fwrite(dir.data(), 1, dir.size(), output);
-
-            central.push_back(centralEntry);
-        }
-
-        for (const auto& entry : files) {
-            ZipEntry centralEntry;
-            centralEntry.name        = entry.relPath;
-            centralEntry.crc         = 0;
-            centralEntry.size        = entry.size;
-            centralEntry.offset      = (u32)ftell(output);
-            centralEntry.isDirectory = false;
-
-            long crcFieldOffset = (long)centralEntry.offset + 14;
-
-            writeLe32(output, 0x04034b50);
-            writeLe16(output, 20);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe32(output, 0); // CRC placeholder, backfilled after streaming
-            writeLe32(output, entry.size);
-            writeLe32(output, entry.size);
-            writeLe16(output, (u16)entry.relPath.size());
-            writeLe16(output, 0);
-            fwrite(entry.relPath.data(), 1, entry.relPath.size(), output);
-
-            FILE* input = fopen(entry.absPath.c_str(), "rb");
-            if (input == nullptr) {
-                fclose(output);
-                outError = StringUtils::format("Cannot read source file for packaging (errno %d).", errno);
-                return false;
-            }
-            u32 crc = 0xFFFFFFFFu;
-            while (true) {
-                if (TransferStatus::cancelRequested()) {
-                    fclose(input);
-                    fclose(output);
-                    outError = "Transfer cancelled.";
-                    return false;
-                }
-                size_t rd = fread(buf.get(), 1, kBuf, input);
-                if (rd == 0) {
-                    break;
-                }
-                crc = updateCrc(crc, buf.get(), rd);
-                fwrite(buf.get(), 1, rd, output);
-                TransferStatus::addBytesDone(rd);
-            }
-            fclose(input);
-            crc ^= 0xFFFFFFFFu;
-
-            long endOffset = ftell(output);
-            fseek(output, crcFieldOffset, SEEK_SET);
-            writeLe32(output, crc);
-            fseek(output, endOffset, SEEK_SET);
-
-            centralEntry.crc = crc;
-            central.push_back(centralEntry);
-        }
-
-        u32 centralOffset = (u32)ftell(output);
-        for (const auto& entry : central) {
-            writeLe32(output, 0x02014b50);
-            writeLe16(output, 20);
-            writeLe16(output, 20);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe32(output, entry.crc);
-            writeLe32(output, entry.size);
-            writeLe32(output, entry.size);
-            writeLe16(output, (u16)entry.name.size());
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe16(output, 0);
-            writeLe32(output, entry.isDirectory ? 0x10 : 0); // FILE_ATTRIBUTE_DIRECTORY
-            writeLe32(output, entry.offset);
-            fwrite(entry.name.data(), 1, entry.name.size(), output);
-        }
-
-        u32 centralSize = (u32)ftell(output) - centralOffset;
-        writeLe32(output, 0x06054b50);
-        writeLe16(output, 0);
-        writeLe16(output, 0);
-        writeLe16(output, (u16)central.size());
-        writeLe16(output, (u16)central.size());
-        writeLe32(output, centralSize);
-        writeLe32(output, centralOffset);
-        writeLe16(output, 0);
-
-        if (fclose(output) != 0) {
-            outError = StringUtils::format("Failed to finalize package file (errno %d).", errno);
-            return false;
-        }
-        return true;
+        return total;
     }
 
     void ensureDirectoryPath(const std::string& base, const std::string& relPath)
@@ -428,6 +275,9 @@ namespace {
             return rd;
         };
 
+        static const size_t kBuf = 0x40000;
+        std::unique_ptr<u8[]> buf(new u8[kBuf]);
+
         bool ok = true;
         while (consumed + 4 <= limit) {
             u8 sigBuf[4];
@@ -469,7 +319,10 @@ namespace {
                 }
             }
 
-            if (compression != 0 || (flags & 0x08)) {
+            // Data-descriptor entries (flag bit 3) are accepted as long as the
+            // local header still carries the real sizes, which is what the
+            // console senders emit when streaming a zip without staging it.
+            if (compression != 0) {
                 outError = "Unsupported ZIP compression.";
                 ok       = false;
                 break;
@@ -497,9 +350,6 @@ namespace {
                 break;
             }
 
-            static const size_t kBuf = 0x8000;
-            std::unique_ptr<u8[]> buf(new u8[kBuf]);
-            initCrc();
             u32 computedCrc = 0xFFFFFFFFu;
             u32 remaining   = compSize;
             bool fileOk     = true;
@@ -525,6 +375,35 @@ namespace {
             if (!fileOk) {
                 ok = false;
                 break;
+            }
+
+            // With flag bit 3 the local-header CRC field is zero and the real
+            // CRC follows the data in a data descriptor (optionally prefixed
+            // with its own signature).
+            if (flags & 0x08) {
+                u8 desc[16];
+                if (readInto(desc, 4) != 4) {
+                    outError = "Corrupted ZIP payload.";
+                    ok       = false;
+                    break;
+                }
+                u32 first = (u32)(desc[0] | (desc[1] << 8) | (desc[2] << 16) | ((u32)desc[3] << 24));
+                if (first == 0x08074b50) {
+                    if (readInto(desc + 4, 12) != 12) {
+                        outError = "Corrupted ZIP payload.";
+                        ok       = false;
+                        break;
+                    }
+                    crc = (u32)(desc[4] | (desc[5] << 8) | (desc[6] << 16) | ((u32)desc[7] << 24));
+                }
+                else {
+                    if (readInto(desc + 4, 8) != 8) {
+                        outError = "Corrupted ZIP payload.";
+                        ok       = false;
+                        break;
+                    }
+                    crc = first;
+                }
             }
 
             computedCrc ^= 0xFFFFFFFFu;
@@ -810,7 +689,7 @@ namespace {
                 return {500, "application/json", "{\"ok\":false,\"error\":\"Failed to store file\"}"};
             }
             fseek(src, (long)fileOffset, SEEK_SET);
-            static const size_t kBuf = 0x8000;
+            static const size_t kBuf = 0x40000;
             std::unique_ptr<u8[]> buf(new u8[kBuf]);
             u64 remaining = fileLen;
             bool copyOk   = true;
@@ -865,6 +744,169 @@ namespace {
             sent += rc;
         }
         return true;
+    }
+
+    // Streams the store-only ZIP straight into the socket, so each backup byte
+    // is read from disk exactly once (the old path staged a temp zip: read +
+    // write + re-read). File CRCs are unknown until the data has been sent, so
+    // file entries set general-purpose flag bit 3 and carry the real CRC in a
+    // signed 16-byte data descriptor after the data; the local header still
+    // holds the real sizes (store-only makes them known upfront), which is
+    // what the console receivers rely on to frame each entry. Total byte
+    // count must match zipStreamSize exactly for Content-Length to hold.
+    bool sendZipStream(int sock, const std::vector<FileEntry>& files, const std::vector<std::string>& dirs, bool& cancelled)
+    {
+        cancelled = false;
+
+        std::vector<ZipEntry> central;
+        central.reserve(dirs.size() + files.size());
+        u32 offset = 0;
+
+        auto sendChunk = [&](const void* data, size_t n) -> bool {
+            if (!sendAll(sock, data, n)) {
+                return false;
+            }
+            offset += (u32)n;
+            TransferStatus::addBytesDone(n);
+            return true;
+        };
+
+        for (const auto& dir : dirs) {
+            ZipEntry centralEntry;
+            centralEntry.name        = dir;
+            centralEntry.crc         = 0;
+            centralEntry.size        = 0;
+            centralEntry.offset      = offset;
+            centralEntry.isDirectory = true;
+
+            std::string hdr;
+            hdr.reserve(30 + dir.size());
+            appendLe32(hdr, 0x04034b50);
+            appendLe16(hdr, 20);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe16(hdr, (u16)dir.size());
+            appendLe16(hdr, 0);
+            hdr.append(dir);
+            if (!sendChunk(hdr.data(), hdr.size())) {
+                return false;
+            }
+
+            central.push_back(centralEntry);
+        }
+
+        static const size_t kBuf = 0x40000;
+        std::unique_ptr<u8[]> buf(new u8[kBuf]);
+
+        for (const auto& entry : files) {
+            ZipEntry centralEntry;
+            centralEntry.name        = entry.relPath;
+            centralEntry.crc         = 0;
+            centralEntry.size        = entry.size;
+            centralEntry.offset      = offset;
+            centralEntry.isDirectory = false;
+
+            std::string hdr;
+            hdr.reserve(30 + entry.relPath.size());
+            appendLe32(hdr, 0x04034b50);
+            appendLe16(hdr, 20);
+            appendLe16(hdr, 0x0008); // flag bit 3: CRC in the data descriptor
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe32(hdr, 0); // CRC, carried by the data descriptor instead
+            appendLe32(hdr, entry.size);
+            appendLe32(hdr, entry.size);
+            appendLe16(hdr, (u16)entry.relPath.size());
+            appendLe16(hdr, 0);
+            hdr.append(entry.relPath);
+            if (!sendChunk(hdr.data(), hdr.size())) {
+                return false;
+            }
+
+            FILE* input = fopen(entry.absPath.c_str(), "rb");
+            if (input == nullptr) {
+                return false;
+            }
+            u32 crc       = 0xFFFFFFFFu;
+            u32 remaining = entry.size;
+            while (remaining > 0) {
+                if (TransferStatus::cancelRequested()) {
+                    fclose(input);
+                    cancelled = true;
+                    return false;
+                }
+                size_t chunk = remaining > kBuf ? kBuf : (size_t)remaining;
+                size_t rd    = fread(buf.get(), 1, chunk, input);
+                if (rd == 0) {
+                    // Short read: the promised sizes can no longer be met, so
+                    // the transfer must fail rather than desync the stream.
+                    fclose(input);
+                    return false;
+                }
+                crc = updateCrc(crc, buf.get(), rd);
+                if (!sendChunk(buf.get(), rd)) {
+                    fclose(input);
+                    return false;
+                }
+                remaining -= (u32)rd;
+            }
+            fclose(input);
+            crc ^= 0xFFFFFFFFu;
+
+            std::string desc;
+            desc.reserve(16);
+            appendLe32(desc, 0x08074b50);
+            appendLe32(desc, crc);
+            appendLe32(desc, entry.size);
+            appendLe32(desc, entry.size);
+            if (!sendChunk(desc.data(), desc.size())) {
+                return false;
+            }
+
+            centralEntry.crc = crc;
+            central.push_back(centralEntry);
+        }
+
+        u32 centralOffset = offset;
+        std::string tail;
+        for (const auto& entry : central) {
+            appendLe32(tail, 0x02014b50);
+            appendLe16(tail, 20);
+            appendLe16(tail, 20);
+            appendLe16(tail, entry.isDirectory ? 0 : 0x0008);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe32(tail, entry.crc);
+            appendLe32(tail, entry.size);
+            appendLe32(tail, entry.size);
+            appendLe16(tail, (u16)entry.name.size());
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe32(tail, entry.isDirectory ? 0x10 : 0); // FILE_ATTRIBUTE_DIRECTORY
+            appendLe32(tail, entry.offset);
+            tail.append(entry.name);
+        }
+
+        u32 centralSize = (u32)tail.size();
+        appendLe32(tail, 0x06054b50);
+        appendLe16(tail, 0);
+        appendLe16(tail, 0);
+        appendLe16(tail, (u16)central.size());
+        appendLe16(tail, (u16)central.size());
+        appendLe32(tail, centralSize);
+        appendLe32(tail, centralOffset);
+        appendLe16(tail, 0);
+
+        return sendChunk(tail.data(), tail.size());
     }
 }
 
@@ -1024,22 +1066,11 @@ void Transfer::clearReceiverCompletion(void)
 Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& backupPath, const std::string& backupName, const std::string& dataType,
     const std::string& ip, u16 port, const std::string& token)
 {
-    // Every exit path must clear the transfer modal and remove the temp zip;
-    // scope guards make that hold for each early return below.
+    // Every exit path must clear the transfer modal; the scope guard makes
+    // that hold for each early return below.
     struct StatusGuard {
         ~StatusGuard() { TransferStatus::end(); }
     } statusGuard;
-
-    struct ZipGuard {
-        std::string path;
-        bool armed = false;
-        ~ZipGuard()
-        {
-            if (armed) {
-                std::remove(path.c_str());
-            }
-        }
-    } zipGuard;
 
     std::vector<FileEntry> files;
     std::vector<std::string> dirs;
@@ -1048,29 +1079,17 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
         return SendOutcome{false, SendStage::EmptyBackup, ""};
     }
 
+    // Multi-file backups are zipped on the fly by sendZipStream — no staged
+    // temp zip; the exact zip size is known upfront because entries are
+    // store-only.
     bool isZip = files.size() != 1 || !dirs.empty();
     std::string payloadPath;
     std::string payloadName;
     u32 payloadSize = 0;
 
     if (isZip) {
-        TransferStatus::beginNetwork("Preparing backup package", totalFileBytes(files));
-
-        u32 zipSize = 0;
-        std::string zipPath =
-            StringUtils::format("%s%s%s%s", CHECKPOINT_ROOT, TEMP_SEND_PREFIX.c_str(), DateTime::dateTimeStr().c_str(), TEMP_SEND_SUFFIX.c_str());
-        if (io::fileExists(zipPath)) {
-            std::remove(zipPath.c_str());
-        }
-        zipGuard.path  = zipPath;
-        zipGuard.armed = true;
-        std::string zipError;
-        if (!writeZip(backupPath, zipPath, zipSize, zipError)) {
-            return SendOutcome{false, TransferStatus::cancelRequested() ? SendStage::Cancelled : SendStage::Zip, ""};
-        }
-        payloadPath = zipPath;
         payloadName = "backup.zip";
-        payloadSize = zipSize;
+        payloadSize = zipStreamSize(files, dirs);
     }
     else {
         const FileEntry& entry = files.front();
@@ -1148,20 +1167,30 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
     bool ok = sendAll(sock, header.data(), header.size()) && sendAll(sock, partMeta.data(), partMeta.size()) &&
               sendAll(sock, partFileHeader.data(), partFileHeader.size());
 
-    if (ok) {
+    if (ok && isZip) {
+        bool cancelled = false;
+        if (!sendZipStream(sock, files, dirs, cancelled)) {
+            if (cancelled) {
+                // The scope guard closes the socket, dropping the connection,
+                // which the receiver treats as an aborted request.
+                return SendOutcome{false, SendStage::Cancelled, ""};
+            }
+            ok = false;
+        }
+    }
+    else if (ok) {
         FILE* input = fopen(payloadPath.c_str(), "rb");
         if (input == nullptr) {
             ok = false;
         }
         else {
-            static const size_t kBuf = 0x8000;
+            static const size_t kBuf = 0x40000;
             std::unique_ptr<u8[]> buf(new u8[kBuf]);
             while (true) {
                 if (TransferStatus::cancelRequested()) {
                     fclose(input);
-                    // The scope guards close the socket (dropping the connection,
-                    // which the receiver treats as an aborted request) and delete
-                    // the temp zip.
+                    // The scope guard closes the socket, dropping the connection,
+                    // which the receiver treats as an aborted request.
                     return SendOutcome{false, SendStage::Cancelled, ""};
                 }
                 size_t rd = fread(buf.get(), 1, kBuf, input);
