@@ -669,6 +669,26 @@
     "nl": "Herstellen van {0} mislukt.",
     "ja": "{0}のリストアに失敗しました。"
   },
+  "outcome.backup_success": {
+    "en": "Progress correctly saved to disk.",
+    "it": "Progressi salvati correttamente su disco.",
+    "es": "Progreso guardado correctamente en el disco.",
+    "fr": "Progression enregistrée correctement sur le disque.",
+    "de": "Fortschritt korrekt auf dem Datenträger gespeichert.",
+    "pt": "Progresso salvo corretamente no disco.",
+    "nl": "Voortgang correct op de schijf opgeslagen.",
+    "ja": "進行状況をディスクに正しく保存しました。"
+  },
+  "outcome.restore_success": {
+    "en": "{0}\nhas been restored successfully.",
+    "it": "{0}\nè stato ripristinato correttamente.",
+    "es": "{0}\nse ha restaurado correctamente.",
+    "fr": "{0}\na été restauré avec succès.",
+    "de": "{0}\nwurde erfolgreich wiederhergestellt.",
+    "pt": "{0}\nfoi restaurado com sucesso.",
+    "nl": "{0}\nis succesvol hersteld.",
+    "ja": "{0}\nを正常にリストアしました。"
+  },
   "outcome.send_zip": {
     "en": "Failed to create backup package.",
     "it": "Impossibile creare il pacchetto di backup.",
@@ -1378,6 +1398,16 @@
     "pt": "Transferência cancelada.",
     "nl": "Overdracht geannuleerd.",
     "ja": "転送をキャンセルしました。"
+  },
+  "transfer.completed": {
+    "en": "Transfer completed.",
+    "it": "Trasferimento completato.",
+    "es": "Transferencia completada.",
+    "fr": "Transfert terminé.",
+    "de": "Übertragung abgeschlossen.",
+    "pt": "Transferência concluída.",
+    "nl": "Overdracht voltooid.",
+    "ja": "転送が完了しました。"
   },
   "media.sd_card": {
     "en": "SD Card",

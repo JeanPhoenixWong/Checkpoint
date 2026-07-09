@@ -26,6 +26,7 @@
 
 #include "transferjob.hpp"
 #include "backuptarget.hpp"
+#include "i18n.hpp"
 #include "io.hpp"
 #include "progress.hpp"
 #include "thread.hpp"
@@ -40,7 +41,7 @@ void TransferJob::enqueueBackup(Title title, BackupKind kind, std::u16string dst
         .kind                     = kind,
         .path                     = std::move(dstPath),
         .dataType                 = std::move(dataType),
-        .successMsg               = "Progress correctly saved to disk.",
+        .successMsg               = i18n::t("outcome.backup_success"),
         .backupName               = "",
         .ip                       = "",
         .token                    = ""});
@@ -69,7 +70,7 @@ void TransferJob::enqueueSend(
     item.title      = std::move(title);
     item.path       = std::move(backupPath);
     item.dataType   = std::move(dataType);
-    item.successMsg = "Transfer completed.";
+    item.successMsg = i18n::t("transfer.completed");
     item.backupName = std::move(backupName);
     item.ip         = std::move(ip);
     item.port       = port;

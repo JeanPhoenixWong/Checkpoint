@@ -80,11 +80,11 @@ namespace {
         {"settings.general.quick_backup", "settings.general.quick_backup.sub"},
     };
     constexpr size_t GENERAL_COUNT = sizeof(GENERAL_ROWS) / sizeof(GENERAL_ROWS[0]);
-    // Extra General row after the toggles: a language cycler (en -> it -> es
-    // -> en). Kept out of the toggle arrays since it has a value, not an
-    // on/off state.
+    // Extra General row shown first, before the toggles: a language cycler
+    // (en -> it -> es -> en). Kept out of the toggle arrays since it has a
+    // value, not an on/off state; the toggle rows follow at idx 1..GENERAL_COUNT.
     constexpr size_t GENERAL_ROW_TOTAL = GENERAL_COUNT + 1;
-    constexpr int LANGUAGE_ROW         = (int)GENERAL_COUNT;
+    constexpr int LANGUAGE_ROW         = 0;
 
     // Supported language codes, in cycle order. Adding a language only means
     // appending here (plus its romfs i18n.json entries and isSupported()).
@@ -284,7 +284,7 @@ void SettingsScreen::drawTop(void) const
     C2D_DrawRectSolid(0, 0, 0.5f, 400, 24, COLOR_SURFACE);
     C2D_DrawRectSolid(0, 24, 0.5f, 400, 1, COLOR_LINE);
     C2D_ImageTint brandTint;
-    C2D_PlainImageTint(&brandTint, Configuration::getInstance().theme() == "light" ? COLOR_BLUE : COLOR_TEAL, 1.0f);
+    C2D_PlainImageTint(&brandTint, COLOR_ACCENT, 1.0f);
     C2D_DrawImageAt(flag, 6, 3, 0.5f, &brandTint, 1.0f, 1.0f);
     float nameX = 6 + ceilf(flag.subtex->width * 1.0f) + 6;
     TextPool::get().draw(i18n::t("settings.title"), nameX, 4, 0.5f, COLOR_TEXT);
@@ -353,8 +353,10 @@ void SettingsScreen::drawGeneral(void) const
                 contentFocus && contentCursor == idx);
         }
         else {
+            // Toggles follow the language row, so shift by one into the toggle arrays.
+            const int g = idx - 1;
             drawToggleRow(
-                rowY, i18n::t(GENERAL_ROWS[idx].nameKey), i18n::t(GENERAL_ROWS[idx].subKey), vals[idx], contentFocus && contentCursor == idx);
+                rowY, i18n::t(GENERAL_ROWS[g].nameKey), i18n::t(GENERAL_ROWS[g].subKey), vals[g], contentFocus && contentCursor == idx);
         }
     }
     drawScrollbar((int)GENERAL_ROW_TOTAL);
@@ -469,7 +471,7 @@ void SettingsScreen::drawAbout(void) const
     std::string ver = StringUtils::versionString();
 
     C2D_ImageTint brandTint;
-    C2D_PlainImageTint(&brandTint, Configuration::getInstance().theme() == "light" ? COLOR_BLUE : COLOR_TEAL, 1.0f);
+    C2D_PlainImageTint(&brandTint, COLOR_ACCENT, 1.0f);
     C2D_DrawImageAt(flag, 20, 36, 0.5f, &brandTint, 1.0f, 1.0f);
     float x = 20 + ceilf(flag.subtex->width * 1.0f) + 8;
     TextPool::get().draw("Checkpoint", x, 34, 0.62f, COLOR_TEXT);
@@ -550,7 +552,9 @@ void SettingsScreen::toggleGeneral(int idx)
         savedTimer = SAVED_FLASH_FRAMES;
         return;
     }
-    switch (idx) {
+    // Toggles follow the language row, so shift by one into the toggle arrays.
+    const int g = idx - 1;
+    switch (g) {
         case 0:
             cfg.setTheme(cfg.theme() == "light" ? "dark" : "light");
             Colors::apply(cfg.theme());
@@ -575,7 +579,7 @@ void SettingsScreen::toggleGeneral(int idx)
             break;
     }
     // Cart scan, NAND saves and DSiWare saves change which titles the grid loads.
-    if (idx == 1 || idx == 2 || idx == 3) {
+    if (g == 1 || g == 2 || g == 3) {
         g_titlesDirty = true;
     }
     savedTimer = SAVED_FLASH_FRAMES;

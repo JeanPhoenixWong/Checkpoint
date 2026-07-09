@@ -180,12 +180,14 @@ void MainScreen::drawTop(void) const
     C2D_TargetClear(g_bottom, COLOR_BASE);
     C2D_SceneBegin(g_top);
 
-    // Header bar.
-    C2D_DrawRectSolid(0, 0, 0.5f, 400, HEADER_H, COLOR_SURFACE);
-    C2D_DrawRectSolid(0, HEADER_H, 0.5f, 400, 1, COLOR_LINE);
-    // Brand mark + wordmark. Teal on dark, Checkpoint blue on light.
+    // Header bar. Slightly thinner than HEADER_H so the top screen reads lighter;
+    // the tile grid stays put because GRID_TOP is fixed, not derived from this.
+    static constexpr int TOP_HEADER_H = 22;
+    C2D_DrawRectSolid(0, 0, 0.5f, 400, TOP_HEADER_H, COLOR_SURFACE);
+    C2D_DrawRectSolid(0, TOP_HEADER_H, 0.5f, 400, 1, COLOR_LINE);
+    // Brand mark + wordmark. Flag tinted with the Checkpoint primary (accent).
     C2D_ImageTint brandTint;
-    C2D_PlainImageTint(&brandTint, Configuration::getInstance().theme() == "light" ? COLOR_BLUE : COLOR_TEAL, 1.0f);
+    C2D_PlainImageTint(&brandTint, COLOR_ACCENT, 1.0f);
     C2D_DrawImageAt(flag, 6, 3, 0.5f, &brandTint, 1.0f, 1.0f);
     float nameX = 6 + ceilf(flag.subtex->width * 1.0f) + 6;
     nameX += text.draw("Checkpoint", nameX, 4, 0.5f, COLOR_TEXT) + 6;
@@ -259,14 +261,16 @@ void MainScreen::drawTop(void) const
         drawSelector();
     }
 
-    // Footer hint bar.
-    C2D_DrawRectSolid(0, 220, 0.5f, 400, FOOTER_H, COLOR_SURFACE);
-    C2D_DrawRectSolid(0, 219, 0.5f, 400, 1, COLOR_LINE);
+    // Footer hint bar. Slightly thinner than FOOTER_H; top nudged down so it clears
+    // the tile grid, which ends at y=220.
+    static constexpr int TOP_FOOTER_TOP = 222;
+    C2D_DrawRectSolid(0, TOP_FOOTER_TOP, 0.5f, 400, 240 - TOP_FOOTER_TOP, COLOR_SURFACE);
+    C2D_DrawRectSolid(0, TOP_FOOTER_TOP - 1, 0.5f, 400, 1, COLOR_LINE);
     if (multi) {
-        drawHints(400, 223, " Tag     hold all     Backup all     Clear");
+        drawHints(400, 224, " Tag     hold all     Backup all     Clear");
     }
     else {
-        drawHints(400, 223, " Open     Tag     Extdata    SELECT Settings");
+        drawHints(400, 224, " Open     Tag     Extdata    SELECT Settings");
     }
 
     // Live transfer status (network sends draw their own modal on the bottom).
@@ -646,7 +650,7 @@ void MainScreen::doRestore(size_t fullIndex, size_t cellIndex)
 
     std::u16string src     = target.fullPath(cellIndex);
     std::string dataType   = target.dataTypeName();
-    std::string successMsg = nameFromCell(cellIndex) + "\nhas been restored successfully.";
+    std::string successMsg = i18n::t("outcome.restore_success", {nameFromCell(cellIndex)});
     removeOverlay();
 
     TransferJob::get().enqueueRestore(std::move(title), backupKind, std::move(src), std::move(dataType), std::move(successMsg));
