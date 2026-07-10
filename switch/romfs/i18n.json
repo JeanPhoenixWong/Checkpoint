@@ -299,6 +299,26 @@
     "nl": "Gebruik de tijdstempel, geen toetsenbord",
     "ja": "キーボードを使わずタイムスタンプを使用"
   },
+  "settings.general.verify_restore": {
+    "en": "Verify after restore",
+    "it": "Verifica dopo il ripristino",
+    "es": "Verificar tras restaurar",
+    "fr": "Vérifier après restauration",
+    "de": "Nach Wiederherstellung prüfen",
+    "pt": "Verificar após restaurar",
+    "nl": "Controleren na herstellen",
+    "ja": "リストア後に検証"
+  },
+  "settings.general.verify_restore.sub": {
+    "en": "Check the restored data matches the backup; slower on huge saves",
+    "it": "Controlla che i dati ripristinati corrispondano al backup; più lento sui salvataggi enormi",
+    "es": "Comprueba que los datos restaurados coincidan con la copia; más lento con guardados enormes",
+    "fr": "Vérifie que les données restaurées correspondent à la sauvegarde ; plus lent pour les sauvegardes volumineuses",
+    "de": "Prüft, ob die wiederhergestellten Daten dem Backup entsprechen; langsamer bei riesigen Speicherständen",
+    "pt": "Verifica se os dados restaurados correspondem ao backup; mais lento em saves enormes",
+    "nl": "Controleert of de herstelde data overeenkomt met de back-up; trager bij enorme saves",
+    "ja": "リストアしたデータがバックアップと一致するか確認（巨大なセーブでは時間がかかります）"
+  },
   "settings.conn.ftp": {
     "en": "FTP server",
     "it": "Server FTP",
@@ -1198,6 +1218,16 @@
     "pt": "Transferência cancelada.",
     "nl": "Overdracht geannuleerd.",
     "ja": "転送をキャンセルしました。"
+  },
+  "transfer.completed": {
+    "en": "Transfer completed.",
+    "it": "Trasferimento completato.",
+    "es": "Transferencia completada.",
+    "fr": "Transfert terminé.",
+    "de": "Übertragung abgeschlossen.",
+    "pt": "Transferência concluída.",
+    "nl": "Overdracht voltooid.",
+    "ja": "転送が完了しました。"
   },
   "outcome.send_zip": {
     "en": "Failed to create backup package.",

@@ -25,6 +25,7 @@
  */
 
 #include "io.hpp"
+#include "configuration.hpp"
 #include "logging.hpp"
 #include "savedatasource.hpp"
 #include "titlecatalog.hpp"
@@ -190,40 +191,6 @@ namespace {
         }
     }
 
-    void logSaveSpace(const char* when)
-    {
-        FsFileSystem* fs = fsdevGetDeviceFileSystem("save");
-        if (fs == NULL) {
-            Logging::warning("Save space ({}): device \"save\" not mounted, cannot query space.", when);
-            return;
-        }
-        s64 freeSpace = 0, totalSpace = 0;
-        Result freeRes  = fsFsGetFreeSpace(fs, "/", &freeSpace);
-        Result totalRes = fsFsGetTotalSpace(fs, "/", &totalSpace);
-        if (R_FAILED(freeRes) || R_FAILED(totalRes)) {
-            Logging::warning("Save space ({}): query failed with results 0x{:08X} / 0x{:08X}.", when, (u32)freeRes, (u32)totalRes);
-        }
-        else {
-            Logging::info("Save space ({}): {} bytes free of {} total.", when, freeSpace, totalSpace);
-        }
-    }
-
-    // Reads and logs the save container's extra data (the live data/journal
-    // sizes and commit id). `commit_id` changing across a commit proves the
-    // commit actually landed on disk.
-    void logSaveExtraData(const char* when, Title& title)
-    {
-        FsSaveDataExtraData extraData = {};
-        Result res                    = fsReadSaveDataFileSystemExtraDataBySaveDataSpaceId(
-            &extraData, sizeof(extraData), (FsSaveDataSpaceId)title.saveDataSpaceId(), title.saveId());
-        if (R_FAILED(res)) {
-            Logging::warning("Save extra data ({}): read failed with result 0x{:08X}.", when, (u32)res);
-            return;
-        }
-        Logging::info("Save extra data ({}): data_size={} journal_size={} commit_id=0x{:016X} flags=0x{:08X} owner_id=0x{:016X} timestamp={}.", when,
-            (u64)extraData.data_size, (u64)extraData.journal_size, (u64)extraData.commit_id, extraData.flags, extraData.owner_id,
-            (u64)extraData.timestamp);
-    }
 }
 
 bool io::fileExists(const std::string& path)
@@ -306,8 +273,6 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
     // commit at the end would overflow the journal and fail (#443, #297).
     const bool toSaveDevice = dstPath.rfind("save:/", 0) == 0;
     u64 journalPending      = 0;
-    u32 crc                 = 0;
-    u32 midFileCommits      = 0;
 
     while (offset < sz) {
         if (sink.cancelled()) {
@@ -343,7 +308,6 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
                 break;
             }
             Logging::debug("Mid-file commit of {} at offset {}/{} OK.", dstPath, offset, sz);
-            midFileCommits++;
             journalPending = 0;
         }
 
@@ -354,7 +318,6 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
         }
         offset += count;
         journalPending += count;
-        crc = updateCrc(crc, buf, count);
         sink.advanceBytes(offset);
     }
 
@@ -373,9 +336,6 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
         if (R_FAILED(res)) {
             Logging::error("Failed to commit file {} to the save archive with result 0x{:08X}.", dstPath, (u32)res);
         }
-    }
-    if (R_SUCCEEDED(res)) {
-        Logging::debug("Copied {} -> {} ({} bytes, crc32 {:08X}, {} mid-file commits).", srcPath, dstPath, offset, crc, midFileCommits);
     }
     return res;
 }
@@ -438,19 +398,13 @@ Result io::deleteFolderRecursively(const std::string& path, bool removeRoot)
 
     Result firstError = 0;
     // A path already gone is not a failed deletion: readdir snapshots can go
-    // stale, and the goal (the entry not existing) is met either way. The raw
-    // name bytes are logged so a name mangled in the readdir round-trip (the
-    // other way remove() can report ENOENT) is visible in the log (#541).
+    // stale, and the goal (the entry not existing) is met either way (#541).
     auto note = [&](int rc, const std::string& target) {
         if (rc == 0) {
             return;
         }
         if (errno == ENOENT) {
-            std::string hex;
-            for (unsigned char c : target) {
-                hex += std::format("{:02X}", c);
-            }
-            Logging::warning("Delete: {} reported ENOENT, ignoring. Path bytes: {}.", target, hex);
+            Logging::debug("Delete: {} reported ENOENT, ignoring.", target);
             return;
         }
         Logging::error("Delete: failed to delete {} with errno {}.", target, errno);
@@ -547,7 +501,7 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         fsReadSaveDataFileSystemExtraDataBySaveDataSpaceId(&extraData, sizeof(extraData), (FsSaveDataSpaceId)title.saveDataSpaceId(), title.saveId());
     if (R_SUCCEEDED(res)) {
         journalSize = (u64)extraData.journal_size;
-        logSaveExtraData("before restore", title);
+        Logging::info("Save extra data: data_size={} journal_size={}.", (u64)extraData.data_size, journalSize);
     }
     else {
         Logging::error("Failed to read save extra data with result 0x{:08X}. Title id: 0x{:016X}. "
@@ -575,7 +529,6 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
             }
             Logging::info("Extended save data of title 0x{:016X} from {} to {} bytes to fit backup of {} bytes.", title.id(),
                 (u64)extraData.data_size, neededSize, backupSize);
-            logSaveExtraData("after extend", title);
         }
         else {
             Logging::info("No extend needed: backup needs {} bytes, save data already has {}.", neededSize, (u64)extraData.data_size);
@@ -589,7 +542,6 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
     }
 
     std::string dstPath = "save:/";
-    logSaveSpace("after mount, before wipe");
 
     res = io::deleteFolderRecursively(dstPath.c_str(), false);
     if (R_FAILED(res)) {
@@ -606,7 +558,6 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         Logging::error("Failed to commit save wipe with result 0x{:08X}.", (u32)res);
         return {false, res, io::BackupStage::Commit};
     }
-    logSaveSpace("after wipe commit");
 
     // leave a margin under the journal size so in-flight writes never overflow
     // it; 0 (extra data unavailable) disables mid-file commits
@@ -631,12 +582,15 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         Logging::error("Failed to commit save with result 0x{:08X}.", res);
         return {false, res, io::BackupStage::Commit};
     }
-    logSaveSpace("after final commit");
+    FileSystem::unmountDevice();
+
+    if (!Configuration::getInstance().isVerifyRestoreEnabled()) {
+        Logging::info("Restore succeeded (verification disabled in settings).");
+        return {true, 0, io::BackupStage::Copy};
+    }
 
     // Verify against a *fresh* mount, so what is compared is what actually got
     // committed to disk — not a cached view of the writes above (#541).
-    FileSystem::unmountDevice();
-    logSaveExtraData("after final commit", title);
     res = SaveDataSource(title.saveDataType()).mount(title);
     if (R_FAILED(res)) {
         Logging::error("Failed to remount save for post-restore verification with result 0x{:08X}. Skipping verification.", (u32)res);

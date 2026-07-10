@@ -271,6 +271,18 @@ void SettingsScreen::rebuildRows(void)
                 flashSaved();
             };
             mRows.push_back(std::move(quickBackup));
+
+            Row verifyRestore;
+            verifyRestore.title      = i18n::t("settings.general.verify_restore");
+            verifyRestore.subtitle   = i18n::t("settings.general.verify_restore.sub");
+            verifyRestore.control    = Control::Toggle;
+            verifyRestore.section    = i18n::t("settings.section.safety");
+            verifyRestore.getOn      = [&cfg]() { return cfg.isVerifyRestoreEnabled(); };
+            verifyRestore.onActivate = [this, &cfg]() {
+                cfg.setVerifyRestoreEnabled(!cfg.isVerifyRestoreEnabled());
+                flashSaved();
+            };
+            mRows.push_back(std::move(verifyRestore));
             break;
         }
         case Category::Connectivity: {
@@ -684,7 +696,7 @@ void SettingsScreen::draw(void) const
     Gfx::ClearScreen(COLOR_BG);
 
     // ---- Top bar ----
-    UiKit::drawHintCircle(24, (TOPBAR_H - 20) / 2, "B");
+    UiKit::drawHintCircle(24, (TOPBAR_H - 20) / 2, "-");
     {
         const std::string title = i18n::t("settings.title");
         u32 tw, th;

@@ -65,6 +65,10 @@ public:
     // Skip the software-keyboard backup-name prompt and use the timestamp
     // suggestion directly. Default false.
     bool isQuickBackupEnabled(void);
+    // Read the whole save back after a restore and compare size + CRC32 of
+    // every file against the backup. Default true; can be disabled because it
+    // roughly doubles restore time on backups with tens of thousands of files.
+    bool isVerifyRestoreEnabled(void);
     std::vector<std::string> additionalSaveFolders(u64 id);
     std::vector<std::string> additionalDeviceSaveFolders(u64 id);
     void save(void);
@@ -90,6 +94,7 @@ public:
     void setTransferEnabled(bool enabled);
     void setConfirmRestoreEnabled(bool enabled);
     void setQuickBackupEnabled(bool enabled);
+    void setVerifyRestoreEnabled(bool enabled);
     void addAdditionalSaveFolder(u64 id, const std::string& path);
     void removeAdditionalSaveFolder(u64 id, const std::string& path);
     void addAdditionalDeviceSaveFolder(u64 id, const std::string& path);
@@ -136,6 +141,7 @@ private:
     bool mTransferEnabled;
     bool mConfirmRestore;
     bool mQuickBackup;
+    bool mVerifyRestore;
     std::unordered_set<u64> mFilterIds, mFavoriteIds;
     std::unordered_map<u64, std::vector<std::string>> mAdditionalSaveFolders, mAdditionalDeviceSaveFolders;
     std::string mTheme;

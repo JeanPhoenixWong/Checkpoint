@@ -85,7 +85,8 @@ public:
     // (IP:port, PIN) happen on the main thread before this; the blocking zip +
     // socket IO runs on the worker. sendBackup drives TransferStatus itself
     // (beginNetwork), so a send does not use the local batch counter/modal.
-    void enqueueSend(Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port, std::string token);
+    void enqueueSend(Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port, std::string token,
+        std::string successMsg);
 
     // Drains the queue on a worker thread, if there is work and none is already
     // running. Idempotent and safe to call with an empty queue.

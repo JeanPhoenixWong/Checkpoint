@@ -64,9 +64,9 @@ std::string UiKit::buttonGlyph(const std::string& key)
     if (key == "ZR")
         return "";
     if (key == "+")
-        return "";
+        return "\uE0B3";
     if (key == "-")
-        return "";
+        return "\uE0B4";
     return key;
 }
 

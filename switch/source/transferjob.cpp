@@ -55,15 +55,15 @@ void TransferJob::enqueueRestore(Title title, std::string srcPath, std::string s
     mQueue.push_back(std::move(item));
 }
 
-void TransferJob::enqueueSend(
-    Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port, std::string token)
+void TransferJob::enqueueSend(Title title, std::string backupPath, std::string backupName, std::string dataType, std::string ip, u16 port,
+    std::string token, std::string successMsg)
 {
     std::lock_guard<std::mutex> lock(mMutex);
     WorkItem item;
     item.kind       = Kind::Send;
     item.title      = std::move(title);
     item.path       = std::move(backupPath);
-    item.successMsg = "Transfer completed.";
+    item.successMsg = std::move(successMsg);
     item.backupName = std::move(backupName);
     item.dataType   = std::move(dataType);
     item.ip         = std::move(ip);

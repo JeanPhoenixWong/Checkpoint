@@ -306,7 +306,7 @@ void MainScreen::draw() const
     {
         u32 gw, gh;
         Gfx::GetTextDimensions(22, "", &gw, &gh);
-        Gfx::DrawText(22, RAIL_ITEM_X + (RAIL_ITEM - (int)gw) / 2, SETTINGS_BTN_Y + (RAIL_ITEM - (int)gh) / 2, COLOR_TEXT2, "");
+        Gfx::DrawText(22, RAIL_ITEM_X + (RAIL_ITEM - (int)gw) / 2, SETTINGS_BTN_Y + (RAIL_ITEM - (int)gh) / 2 + 3, COLOR_TEXT2, "");
     }
 
     Shapes::fillRound(AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE, AVATAR_SIZE / 2, COLOR_TILE);
@@ -1022,8 +1022,8 @@ void MainScreen::startTransferSend(void)
         return;
     }
 
-    TransferJob::get().enqueueSend(
-        std::move(title), std::move(backupPath), std::move(backupName), "save", std::move(dst->ip), dst->port, std::move(pinResp.second));
+    TransferJob::get().enqueueSend(std::move(title), std::move(backupPath), std::move(backupName), "save", std::move(dst->ip), dst->port,
+        std::move(pinResp.second), i18n::t("transfer.completed"));
     TransferJob::get().start();
 }
 
