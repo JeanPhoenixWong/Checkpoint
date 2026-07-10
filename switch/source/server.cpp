@@ -110,6 +110,23 @@ namespace {
         }
     }
 
+    // send() may accept fewer bytes than asked (a short write), so a single call
+    // silently truncates the MB-scale /logs/* bodies. Loop until the whole buffer
+    // is out. Returns false on a closed/errored socket.
+    bool sendAll(s32 sock, const void* data, size_t len)
+    {
+        const char* ptr = static_cast<const char*>(data);
+        size_t sent     = 0;
+        while (sent < len) {
+            ssize_t rc = send(sock, ptr + sent, len - sent, 0);
+            if (rc <= 0) {
+                return false;
+            }
+            sent += (size_t)rc;
+        }
+        return true;
+    }
+
     void sendResponse(s32 clientSocket, const Server::HttpResponse& response)
     {
         std::string header = "HTTP/1.1 " + std::to_string(response.statusCode);
@@ -117,8 +134,8 @@ namespace {
         header += "\r\nContent-Type: " + response.contentType;
         header += "\r\nContent-Length: " + std::to_string(response.body.length());
         header += "\r\n\r\n";
-        send(clientSocket, header.c_str(), header.length(), 0);
-        send(clientSocket, response.body.c_str(), response.body.length(), 0);
+        sendAll(clientSocket, header.c_str(), header.length());
+        sendAll(clientSocket, response.body.c_str(), response.body.length());
     }
 
     std::string extractPath(const std::string& request)
@@ -269,8 +286,8 @@ namespace {
             std::string body = "{\"ok\":false,\"error\":\"Payload too large\"}";
             std::string header =
                 "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.length()) + "\r\n\r\n";
-            send(clientSocket, header.c_str(), header.length(), 0);
-            send(clientSocket, body.c_str(), body.length(), 0);
+            sendAll(clientSocket, header.c_str(), header.length());
+            sendAll(clientSocket, body.c_str(), body.length());
             return;
         }
         while (data.size() < bodyStart + contentLength) {
@@ -297,7 +314,7 @@ namespace {
         }
         else {
             std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-            send(clientSocket, response.c_str(), response.length(), 0);
+            sendAll(clientSocket, response.c_str(), response.length());
         }
     }
 
