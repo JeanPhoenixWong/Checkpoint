@@ -33,6 +33,7 @@
 #include "loader.hpp"
 #include "logging.hpp"
 #include "server.hpp"
+#include "transferprotocol.hpp"
 #include "transferstatus.hpp"
 #include "util.hpp"
 #include <3ds.h>
@@ -52,6 +53,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
+
+// The wire protocol (CRC, zip framing, path safety, HTTP header/auth helpers) is
+// shared with the Switch build and chlink; the definitions live in
+// common/transferprotocol. This file owns only the 3DS file+socket IO around it.
+using namespace TransferProto;
 
 namespace {
     static const int TRANSFER_PORT = 8000;
@@ -96,59 +102,6 @@ namespace {
         u32 crc;
     };
 
-    struct ZipEntry {
-        std::string name;
-        u32 crc;
-        u32 size;
-        u32 offset;
-        bool isDirectory;
-    };
-
-    u32 crcTable[8][256];
-    bool crcInit = false;
-
-    void initCrc(void)
-    {
-        if (crcInit) {
-            return;
-        }
-        for (u32 i = 0; i < 256; ++i) {
-            u32 c = i;
-            for (int j = 0; j < 8; ++j) {
-                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-            }
-            crcTable[0][i] = c;
-        }
-        for (u32 i = 0; i < 256; ++i) {
-            u32 c = crcTable[0][i];
-            for (int t = 1; t < 8; ++t) {
-                c              = crcTable[0][c & 0xFFu] ^ (c >> 8);
-                crcTable[t][i] = c;
-            }
-        }
-        crcInit = true;
-    }
-
-    // Slicing-by-8 CRC32: 8 bytes per iteration instead of 1. On the 268MHz
-    // ARM11 the bytewise loop is slow enough to rival the SD card, so this
-    // keeps the checksum off the transfer's critical path.
-    u32 updateCrc(u32 crc, const u8* data, size_t len)
-    {
-        u32 c = crc;
-        while (len >= 8) {
-            u32 lo = (u32)(data[0] | (data[1] << 8) | (data[2] << 16) | ((u32)data[3] << 24)) ^ c;
-            u32 hi = (u32)(data[4] | (data[5] << 8) | (data[6] << 16) | ((u32)data[7] << 24));
-            c      = crcTable[7][lo & 0xFFu] ^ crcTable[6][(lo >> 8) & 0xFFu] ^ crcTable[5][(lo >> 16) & 0xFFu] ^ crcTable[4][lo >> 24] ^
-                crcTable[3][hi & 0xFFu] ^ crcTable[2][(hi >> 8) & 0xFFu] ^ crcTable[1][(hi >> 16) & 0xFFu] ^ crcTable[0][hi >> 24];
-            data += 8;
-            len -= 8;
-        }
-        for (size_t i = 0; i < len; ++i) {
-            c = crcTable[0][(c ^ data[i]) & 0xFFu] ^ (c >> 8);
-        }
-        return c;
-    }
-
     void collectFiles(FS_Archive arch, const std::u16string& root, const std::u16string& sub, std::vector<FileEntry>& out,
         std::vector<std::string>* outDirs = nullptr)
     {
@@ -190,38 +143,6 @@ namespace {
         }
     }
 
-    void appendLe16(std::string& out, u16 v)
-    {
-        out.push_back((char)(v & 0xFF));
-        out.push_back((char)((v >> 8) & 0xFF));
-    }
-
-    void appendLe32(std::string& out, u32 v)
-    {
-        out.push_back((char)(v & 0xFF));
-        out.push_back((char)((v >> 8) & 0xFF));
-        out.push_back((char)((v >> 16) & 0xFF));
-        out.push_back((char)((v >> 24) & 0xFF));
-    }
-
-    // Exact byte size of the ZIP produced by sendZipStream. Store-only entries
-    // make it fully deterministic, which is what lets the zip be streamed
-    // straight into the socket with a correct Content-Length and no staged
-    // temp file on the SD card.
-    u32 zipStreamSize(const std::vector<FileEntry>& files, const std::vector<std::string>& dirs)
-    {
-        u32 total = 22; // end of central directory
-        for (const auto& dir : dirs) {
-            total += 30 + dir.size(); // local header
-            total += 46 + dir.size(); // central directory
-        }
-        for (const auto& entry : files) {
-            total += 30 + entry.relPath.size() + entry.size + 16; // local header + data + data descriptor
-            total += 46 + entry.relPath.size();                   // central directory
-        }
-        return total;
-    }
-
     bool ensureDirectoryPath(const std::u16string& base, const std::string& relPath)
     {
         std::u16string current = base;
@@ -241,38 +162,6 @@ namespace {
             }
             start = pos + 1;
         }
-        return true;
-    }
-
-    bool isSafeZipRelativePath(const std::string& relPath)
-    {
-        if (relPath.empty()) {
-            return false;
-        }
-        if (relPath.front() == '/' || relPath.front() == '\\') {
-            return false;
-        }
-        if (relPath.find('\\') != std::string::npos) {
-            return false;
-        }
-        if (relPath.find(':') != std::string::npos) {
-            return false;
-        }
-
-        size_t start = 0;
-        while (start <= relPath.size()) {
-            size_t pos       = relPath.find('/', start);
-            size_t len       = (pos == std::string::npos) ? relPath.size() - start : pos - start;
-            std::string part = relPath.substr(start, len);
-            if (part == "..") {
-                return false;
-            }
-            if (pos == std::string::npos) {
-                break;
-            }
-            start = pos + 1;
-        }
-
         return true;
     }
 
@@ -304,7 +193,6 @@ namespace {
 
         static const u32 kBuf = 0x40000;
         std::unique_ptr<u8[]> buf(new u8[kBuf]);
-        initCrc();
 
         bool ok = true;
         while (consumed + 4 <= limit) {
@@ -448,24 +336,6 @@ namespace {
         return ok;
     }
 
-    std::string headerValue(const std::string& headers, const std::string& key)
-    {
-        std::string needle = key + ":";
-        size_t pos         = headers.find(needle);
-        if (pos == std::string::npos) {
-            return "";
-        }
-        pos += needle.size();
-        while (pos < headers.size() && (headers[pos] == ' ' || headers[pos] == '\t')) {
-            pos++;
-        }
-        size_t end = headers.find("\r\n", pos);
-        if (end == std::string::npos) {
-            end = headers.size();
-        }
-        return headers.substr(pos, end - pos);
-    }
-
     // Locates the multipart parts inside the streamed body temp file. The meta
     // part is small and read into RAM; the file part is returned as a byte range
     // [outFileOffset, outFileOffset+outFileLen) into the body file, so the (large)
@@ -553,20 +423,6 @@ namespace {
         info["maxUploadBytes"] = 0;
         info["freeSpaceBytes"] = 0;
         return {200, "application/json", info.dump()};
-    }
-
-    // Constant-time comparison so a wrong PIN can't be narrowed down by timing
-    // how far the comparison got before it failed.
-    bool constantTimeEquals(const std::string& a, const std::string& b)
-    {
-        if (a.size() != b.size()) {
-            return false;
-        }
-        unsigned char diff = 0;
-        for (size_t i = 0; i < a.size(); ++i) {
-            diff |= (unsigned char)(a[i] ^ b[i]);
-        }
-        return diff == 0;
     }
 
     Server::HttpResponse handleUpload(const Server::UploadRequest& req)
@@ -804,7 +660,6 @@ namespace {
     bool sendZipStream(int sock, const std::vector<FileEntry>& files, const std::vector<std::string>& dirs, bool& cancelled)
     {
         cancelled = false;
-        initCrc();
 
         std::vector<ZipEntry> central;
         central.reserve(dirs.size() + files.size());
@@ -1319,19 +1174,14 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
 
 std::optional<Transfer::TransferTarget> Transfer::parseTarget(const std::string& ipPort)
 {
-    size_t colon = ipPort.find(':');
-    if (colon == std::string::npos) {
+    auto hp = TransferProto::parseTarget(ipPort);
+    if (!hp) {
         return std::nullopt;
     }
-    std::string ip = ipPort.substr(0, colon);
-    int port       = atoi(ipPort.substr(colon + 1).c_str());
-    if (ip.empty() || port <= 0 || port > 65535) {
-        return std::nullopt;
-    }
-    return TransferTarget{std::move(ip), (u16)port};
+    return TransferTarget{std::move(hp->ip), hp->port};
 }
 
 bool Transfer::validPin(const std::string& pin)
 {
-    return pin.size() == 4 && std::all_of(pin.begin(), pin.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    return TransferProto::validPin(pin);
 }
