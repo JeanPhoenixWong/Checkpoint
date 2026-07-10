@@ -326,7 +326,7 @@ bool TitleCatalog::scanCard(void)
             res = AM_GetTitleCount(MEDIATYPE_GAME_CARD, &count);
             if (R_SUCCEEDED(res) && count > 0) {
                 u64 id;
-                res = AM_GetTitleList(NULL, MEDIATYPE_GAME_CARD, count, &id);
+                res = AM_GetTitleList(NULL, MEDIATYPE_GAME_CARD, 1, &id);
                 if (validId(id)) {
                     Title title;
                     IconStore cardIcons;
