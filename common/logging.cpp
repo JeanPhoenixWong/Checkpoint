@@ -90,7 +90,7 @@ void Logging::init()
 
 #if defined(SERVER_HPP)
     Server::registerHandler("/logs/memory",
-        [](const std::string& path, const std::string& requestData) -> Server::HttpResponse { return {200, "text/plain", applicationLogs}; });
+        [](const std::string& path, const std::string& requestData) -> Server::HttpResponse { return {200, "text/plain", getApplicationLogs()}; });
 
     Server::registerHandler("/logs/file", [](const std::string& path, const std::string& requestData) -> Server::HttpResponse {
         std::lock_guard<std::mutex> lock(logMutex);
