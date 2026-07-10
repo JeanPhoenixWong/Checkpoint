@@ -38,12 +38,15 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -732,11 +735,33 @@ namespace {
         return {200, "application/json", resp.dump()};
     }
 
+    // A stalled receiver must not wedge the sender: the send runs on the
+    // TransferJob worker and app exit is gated on !active(), so a peer that
+    // accepts and then never reads/replies would hang recv()/send() and join()
+    // forever. The 3DS SOC layer has no SO_RCVTIMEO (see server.cpp's pollRecv),
+    // so we keep the socket non-blocking and bound every wait with poll().
+    constexpr int NET_TIMEOUT_MS = 15000;
+
+    // Waits up to timeoutMs for `events` on sock. Returns 1 if ready, 0 on
+    // timeout, -1 on error.
+    int pollSocket(int sock, short events, int timeoutMs)
+    {
+        struct pollfd pfd;
+        pfd.fd      = sock;
+        pfd.events  = events;
+        pfd.revents = 0;
+        int rc      = poll(&pfd, 1, timeoutMs);
+        return rc > 0 ? 1 : rc;
+    }
+
     bool sendAll(int sock, const void* data, size_t len)
     {
         const u8* ptr = static_cast<const u8*>(data);
         size_t sent   = 0;
         while (sent < len) {
+            if (pollSocket(sock, POLLOUT, NET_TIMEOUT_MS) <= 0) {
+                return false; // timeout or error: abandon rather than block forever
+            }
             int rc = send(sock, ptr + sent, len - sent, 0);
             if (rc <= 0) {
                 return false;
@@ -1148,6 +1173,10 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
         ~SockGuard() { close(fd); }
     } sockGuard{sock};
 
+    // Non-blocking for the socket's whole lifetime; every send/recv is poll-gated
+    // below so a half-open peer can't block forever.
+    fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
+
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -1156,7 +1185,18 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
         return SendOutcome{false, SendStage::Resolve, ""};
     }
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-        return SendOutcome{false, SendStage::Connect, ""};
+        if (errno != EINPROGRESS) {
+            return SendOutcome{false, SendStage::Connect, ""};
+        }
+        // Bounded wait for the connection to complete, then confirm via SO_ERROR.
+        if (pollSocket(sock, POLLOUT, NET_TIMEOUT_MS) <= 0) {
+            return SendOutcome{false, SendStage::Connect, ""};
+        }
+        int soErr       = 0;
+        socklen_t optLen = sizeof(soErr);
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &soErr, &optLen) != 0 || soErr != 0) {
+            return SendOutcome{false, SendStage::Connect, ""};
+        }
     }
 
     std::string header = StringUtils::format("POST /transfer/upload HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n", ip.c_str(), port);
@@ -1215,6 +1255,9 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
     {
         char responseBuf[512];
         while (true) {
+            if (pollSocket(sock, POLLIN, NET_TIMEOUT_MS) <= 0) {
+                break; // timeout or error: stop waiting on a silent peer
+            }
             int rc = recv(sock, responseBuf, sizeof(responseBuf), 0);
             if (rc <= 0) {
                 break;
