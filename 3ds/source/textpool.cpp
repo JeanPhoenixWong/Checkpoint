@@ -26,6 +26,7 @@
 
 #include "textpool.hpp"
 #include "util.hpp"
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -112,7 +113,9 @@ float TextPool::draw(const std::string& s, float x, float y, float scale, u32 co
 
 void TextPool::drawCentered(const std::string& s, float x, float w, float y, float scale, u32 color, float depth)
 {
-    const C2D_Text* t = obtain(s);
+    // truncate() returns `s` unchanged when it already fits, so the common
+    // case costs one cached width measure.
+    const C2D_Text* t = obtain(truncate(s, w, scale));
     const float cx    = x + (w - StringUtils::textWidth(*t, scale)) / 2;
     C2D_DrawText(t, C2D_WithColor, floorf(cx + 0.5f), floorf(y + 0.5f), depth, scale, scale, color);
 }
@@ -126,6 +129,15 @@ void TextPool::drawWrapped(const std::string& s, float x, float y, float scale, 
 float TextPool::width(const std::string& s, float scale) const
 {
     return StringUtils::textWidth(s, scale);
+}
+
+float TextPool::fitScale(const std::string& s, float maxWidth, float scale, float minScale) const
+{
+    const float w = StringUtils::textWidth(s, scale);
+    if (w <= maxWidth || w <= 0.0f) {
+        return scale;
+    }
+    return std::max(scale * maxWidth / w, minScale);
 }
 
 std::string TextPool::truncate(const std::string& s, float maxWidth, float scale) const

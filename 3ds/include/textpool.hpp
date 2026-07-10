@@ -53,7 +53,8 @@ public:
     // the caller's layer draws at (screens use 0.5, modal overlays 0.6+).
     float draw(const std::string& s, float x, float y, float scale, u32 color, float depth = 0.5f);
 
-    // Draws `s` horizontally centered inside [x, x + w).
+    // Draws `s` horizontally centered inside [x, x + w). Text wider than `w`
+    // is ellipsis-truncated so it never escapes the box it centers in.
     void drawCentered(const std::string& s, float x, float w, float y, float scale, u32 color, float depth = 0.5f);
 
     // Draws a word-wrapped paragraph limited to maxWidth. `alignFlags` may add
@@ -62,6 +63,11 @@ public:
 
     // Measures without parsing (multi-line strings measure their widest line).
     float width(const std::string& s, float scale) const;
+
+    // Largest scale <= `scale` at which `s` fits maxWidth, floored at
+    // minScale. Width is linear in scale so this is a single measure, not a
+    // search. If even minScale overflows, the caller truncates at minScale.
+    float fitScale(const std::string& s, float maxWidth, float scale, float minScale) const;
 
     // Shortens `s` with a trailing ellipsis until it fits maxWidth. Respects
     // UTF-8 codepoint boundaries and never parses.

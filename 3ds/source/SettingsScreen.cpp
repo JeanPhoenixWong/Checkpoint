@@ -355,8 +355,7 @@ void SettingsScreen::drawGeneral(void) const
         else {
             // Toggles follow the language row, so shift by one into the toggle arrays.
             const int g = idx - 1;
-            drawToggleRow(
-                rowY, i18n::t(GENERAL_ROWS[g].nameKey), i18n::t(GENERAL_ROWS[g].subKey), vals[g], contentFocus && contentCursor == idx);
+            drawToggleRow(rowY, i18n::t(GENERAL_ROWS[g].nameKey), i18n::t(GENERAL_ROWS[g].subKey), vals[g], contentFocus && contentCursor == idx);
         }
     }
     drawScrollbar((int)GENERAL_ROW_TOTAL);
