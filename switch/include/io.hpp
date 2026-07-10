@@ -48,7 +48,7 @@ class Title;
 namespace io {
     // The stage at which a backup/restore failed. The UI maps it to a human
     // message; io itself carries no UI text.
-    enum class BackupStage { OpenArchive, DeleteDst, CreateDst, Copy, Commit };
+    enum class BackupStage { OpenArchive, DeleteDst, CreateDst, Copy, Commit, Verify };
 
     struct IoOutcome {
         bool ok;

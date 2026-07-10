@@ -28,6 +28,9 @@
 #include "logging.hpp"
 #include "savedatasource.hpp"
 #include "titlecatalog.hpp"
+#include <arm_acle.h>
+#include <chrono>
+#include <cstring>
 
 // Errno-domain copy failures (fopen/fread/fwrite/mkdir) folded into the Result
 // channel that IoOutcome carries; the exact cause is in the log.
@@ -45,6 +48,183 @@ static constexpr u64 SAVE_EXTEND_MARGIN = 0x500000;
 // up to one cluster of slack, which adds up for backups with thousands of small
 // files (see #541).
 static constexpr u64 SAVE_CLUSTER_SIZE = 0x4000;
+
+namespace {
+    // Hardware CRC32 (zlib polynomial), same routine as transfer.cpp: only used
+    // to compare a backup file against its restored copy, so the exact variant
+    // doesn't matter as long as both sides use this function.
+    u32 updateCrc(u32 crc, const u8* data, size_t len)
+    {
+        u32 c = crc;
+        while (len >= 8) {
+            u64 v;
+            std::memcpy(&v, data, 8);
+            c = __crc32d(c, v);
+            data += 8;
+            len -= 8;
+        }
+        while (len > 0) {
+            c = __crc32b(c, *data++);
+            len--;
+        }
+        return c;
+    }
+
+    bool fileSizeAndCrc(const std::string& path, u64& outSize, u32& outCrc)
+    {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (f == NULL) {
+            Logging::error("Verification: failed to open {} with errno {}.", path, errno);
+            return false;
+        }
+        u8* buf  = new u8[BUFFER_SIZE];
+        u64 size = 0;
+        u32 crc  = 0;
+        size_t count;
+        while ((count = fread(buf, 1, BUFFER_SIZE, f)) > 0) {
+            crc = updateCrc(crc, buf, count);
+            size += count;
+        }
+        const bool readError = ferror(f) != 0;
+        delete[] buf;
+        fclose(f);
+        if (readError) {
+            Logging::error("Verification: read error on {} with errno {}.", path, errno);
+            return false;
+        }
+        outSize = size;
+        outCrc  = crc;
+        return true;
+    }
+
+    struct VerifyStats {
+        size_t checked      = 0;
+        size_t missing      = 0;
+        size_t sizeMismatch = 0;
+        size_t crcMismatch  = 0;
+        size_t unreadable   = 0;
+        size_t extraneous   = 0;
+
+        size_t problems() const { return missing + sizeMismatch + crcMismatch + unreadable + extraneous; }
+    };
+
+    // Walks the backup tree and checks every file has a byte-identical (size +
+    // CRC32) counterpart in the restored save.
+    void verifyTree(const std::string& srcPath, const std::string& dstPath, VerifyStats& stats, ProgressSink& sink)
+    {
+        Directory items(srcPath);
+        if (!items.good()) {
+            Logging::error("Verification: failed to list backup directory {} with result 0x{:08X}.", srcPath, (u32)items.error());
+            stats.unreadable++;
+            return;
+        }
+        for (size_t i = 0, sz = items.size(); i < sz; i++) {
+            const std::string src = srcPath + items.entry(i);
+            const std::string dst = dstPath + items.entry(i);
+            if (items.folder(i)) {
+                if (!io::directoryExists(dst)) {
+                    Logging::error("Verification: directory {} missing from restored save.", dst);
+                    stats.missing++;
+                }
+                else {
+                    verifyTree(src + "/", dst + "/", stats, sink);
+                }
+            }
+            else {
+                sink.startFile(items.entry(i), 0);
+                stats.checked++;
+                u64 srcSize = 0, dstSize = 0;
+                u32 srcCrc = 0, dstCrc = 0;
+                if (!fileSizeAndCrc(src, srcSize, srcCrc)) {
+                    stats.unreadable++;
+                }
+                else {
+                    struct stat st;
+                    if (stat(dst.c_str(), &st) != 0) {
+                        Logging::error("Verification: file {} missing from restored save (errno {}).", dst, errno);
+                        stats.missing++;
+                    }
+                    else if (!fileSizeAndCrc(dst, dstSize, dstCrc)) {
+                        stats.unreadable++;
+                    }
+                    else if (srcSize != dstSize) {
+                        Logging::error("Verification: size mismatch on {}: backup {} bytes, save {} bytes.", dst, srcSize, dstSize);
+                        stats.sizeMismatch++;
+                    }
+                    else if (srcCrc != dstCrc) {
+                        Logging::error("Verification: CRC mismatch on {} ({} bytes): backup {:08X}, save {:08X}.", dst, srcSize, srcCrc, dstCrc);
+                        stats.crcMismatch++;
+                    }
+                }
+                sink.finishFile();
+            }
+        }
+    }
+
+    // Walks the restored save and flags anything the wipe should have removed
+    // but that isn't part of the backup.
+    void scanExtraneous(const std::string& dstPath, const std::string& srcPath, VerifyStats& stats)
+    {
+        Directory items(dstPath);
+        if (!items.good()) {
+            Logging::error("Verification: failed to list save directory {} with result 0x{:08X}.", dstPath, (u32)items.error());
+            stats.unreadable++;
+            return;
+        }
+        for (size_t i = 0, sz = items.size(); i < sz; i++) {
+            const std::string dst = dstPath + items.entry(i);
+            const std::string src = srcPath + items.entry(i);
+            if (items.folder(i)) {
+                if (!io::directoryExists(src)) {
+                    Logging::error("Verification: extraneous directory {} present in restored save.", dst);
+                    stats.extraneous++;
+                }
+                else {
+                    scanExtraneous(dst + "/", src + "/", stats);
+                }
+            }
+            else if (!io::fileExists(src)) {
+                Logging::error("Verification: extraneous file {} present in restored save.", dst);
+                stats.extraneous++;
+            }
+        }
+    }
+
+    void logSaveSpace(const char* when)
+    {
+        FsFileSystem* fs = fsdevGetDeviceFileSystem("save");
+        if (fs == NULL) {
+            Logging::warning("Save space ({}): device \"save\" not mounted, cannot query space.", when);
+            return;
+        }
+        s64 freeSpace = 0, totalSpace = 0;
+        Result freeRes  = fsFsGetFreeSpace(fs, "/", &freeSpace);
+        Result totalRes = fsFsGetTotalSpace(fs, "/", &totalSpace);
+        if (R_FAILED(freeRes) || R_FAILED(totalRes)) {
+            Logging::warning("Save space ({}): query failed with results 0x{:08X} / 0x{:08X}.", when, (u32)freeRes, (u32)totalRes);
+        }
+        else {
+            Logging::info("Save space ({}): {} bytes free of {} total.", when, freeSpace, totalSpace);
+        }
+    }
+
+    // Reads and logs the save container's extra data (the live data/journal
+    // sizes and commit id). `commit_id` changing across a commit proves the
+    // commit actually landed on disk.
+    void logSaveExtraData(const char* when, Title& title)
+    {
+        FsSaveDataExtraData extraData = {};
+        Result res                    = fsReadSaveDataFileSystemExtraDataBySaveDataSpaceId(
+            &extraData, sizeof(extraData), (FsSaveDataSpaceId)title.saveDataSpaceId(), title.saveId());
+        if (R_FAILED(res)) {
+            Logging::warning("Save extra data ({}): read failed with result 0x{:08X}.", when, (u32)res);
+            return;
+        }
+        Logging::info("Save extra data ({}): data_size={} journal_size={} commit_id=0x{:016X} flags=0x{:08X} owner_id=0x{:016X} timestamp={}.", when,
+            (u64)extraData.data_size, (u64)extraData.journal_size, (u64)extraData.commit_id, extraData.flags, extraData.owner_id,
+            (u64)extraData.timestamp);
+    }
+}
 
 bool io::fileExists(const std::string& path)
 {
@@ -126,6 +306,8 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
     // commit at the end would overflow the journal and fail (#443, #297).
     const bool toSaveDevice = dstPath.rfind("save:/", 0) == 0;
     u64 journalPending      = 0;
+    u32 crc                 = 0;
+    u32 midFileCommits      = 0;
 
     while (offset < sz) {
         if (sink.cancelled()) {
@@ -160,6 +342,8 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
                 res = RES_COPY_FAILED;
                 break;
             }
+            Logging::debug("Mid-file commit of {} at offset {}/{} OK.", dstPath, offset, sz);
+            midFileCommits++;
             journalPending = 0;
         }
 
@@ -170,6 +354,7 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
         }
         offset += count;
         journalPending += count;
+        crc = updateCrc(crc, buf, count);
         sink.advanceBytes(offset);
     }
 
@@ -188,6 +373,9 @@ Result io::copyFile(const std::string& srcPath, const std::string& dstPath, Prog
         if (R_FAILED(res)) {
             Logging::error("Failed to commit file {} to the save archive with result 0x{:08X}.", dstPath, (u32)res);
         }
+    }
+    if (R_SUCCEEDED(res)) {
+        Logging::debug("Copied {} -> {} ({} bytes, crc32 {:08X}, {} mid-file commits).", srcPath, dstPath, offset, crc, midFileCommits);
     }
     return res;
 }
@@ -244,12 +432,29 @@ Result io::deleteFolderRecursively(const std::string& path, bool removeRoot)
 {
     Directory dir(path);
     if (!dir.good()) {
+        Logging::error("Delete: failed to list directory {} with errno {}.", path, (u32)dir.error());
         return dir.error();
     }
 
     Result firstError = 0;
-    auto note         = [&](int rc) {
-        if (rc != 0 && firstError == 0) {
+    // A path already gone is not a failed deletion: readdir snapshots can go
+    // stale, and the goal (the entry not existing) is met either way. The raw
+    // name bytes are logged so a name mangled in the readdir round-trip (the
+    // other way remove() can report ENOENT) is visible in the log (#541).
+    auto note = [&](int rc, const std::string& target) {
+        if (rc == 0) {
+            return;
+        }
+        if (errno == ENOENT) {
+            std::string hex;
+            for (unsigned char c : target) {
+                hex += std::format("{:02X}", c);
+            }
+            Logging::warning("Delete: {} reported ENOENT, ignoring. Path bytes: {}.", target, hex);
+            return;
+        }
+        Logging::error("Delete: failed to delete {} with errno {}.", target, errno);
+        if (firstError == 0) {
             firstError = errno ? errno : -1;
         }
     };
@@ -262,16 +467,16 @@ Result io::deleteFolderRecursively(const std::string& path, bool removeRoot)
                 firstError = sub;
             }
             newpath = path + dir.entry(i);
-            note(rmdir(newpath.c_str()));
+            note(rmdir(newpath.c_str()), newpath);
         }
         else {
             std::string newpath = path + dir.entry(i);
-            note(std::remove(newpath.c_str()));
+            note(std::remove(newpath.c_str()), newpath);
         }
     }
 
     if (removeRoot) {
-        note(rmdir(path.c_str()));
+        note(rmdir(path.c_str()), path);
     }
     return firstError;
 }
@@ -328,8 +533,10 @@ io::IoOutcome io::backup(Title& title, const std::string& dstPath, ProgressSink&
 
 io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink& sink)
 {
-    Logging::info("Started restore of {}. Title id: 0x{:016X}; User id: 0x{:X}{:X}.", title.name().c_str(), title.id(), title.userId().uid[1],
-        title.userId().uid[0]);
+    Logging::info(
+        "Started restore of {}. Title id: 0x{:016X}; User id: 0x{:X}{:X}; Source: {}; Save data type: {}; Space id: {}; Save id: 0x{:016X}.",
+        title.name().c_str(), title.id(), title.userId().uid[1], title.userId().uid[0], srcPath, (int)title.saveDataType(),
+        (int)title.saveDataSpaceId(), title.saveId());
 
     // The extra data holds the *actual* current data/journal sizes of this save
     // container (the NACP only has the initial ones, stale once a save has been
@@ -340,6 +547,7 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         fsReadSaveDataFileSystemExtraDataBySaveDataSpaceId(&extraData, sizeof(extraData), (FsSaveDataSpaceId)title.saveDataSpaceId(), title.saveId());
     if (R_SUCCEEDED(res)) {
         journalSize = (u64)extraData.journal_size;
+        logSaveExtraData("before restore", title);
     }
     else {
         Logging::error("Failed to read save extra data with result 0x{:08X}. Title id: 0x{:016X}. "
@@ -347,13 +555,15 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
             (u32)res, title.id());
     }
 
+    Logging::info("Scanning backup {} (this can take minutes for backups with many files)...", srcPath);
     const size_t fileCount = io::countFiles(srcPath);
+    const u64 backupSize   = io::directorySize(srcPath);
+    Logging::info("Backup to restore: {} files, {} bytes total.", fileCount, backupSize);
 
     // If the backup doesn't fit the currently allocated save data, grow the
     // partition before restoring: a save can outgrow its original allocation as
     // the game adds content (#443, #297, #541).
     if (journalSize > 0 && title.saveDataType() != FsSaveDataType_System) {
-        const u64 backupSize = io::directorySize(srcPath);
         // each file wastes up to one allocation cluster on the save filesystem
         const u64 neededSize = backupSize + (u64)fileCount * SAVE_CLUSTER_SIZE + SAVE_EXTEND_MARGIN;
         if (neededSize > (u64)extraData.data_size) {
@@ -365,6 +575,10 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
             }
             Logging::info("Extended save data of title 0x{:016X} from {} to {} bytes to fit backup of {} bytes.", title.id(),
                 (u64)extraData.data_size, neededSize, backupSize);
+            logSaveExtraData("after extend", title);
+        }
+        else {
+            Logging::info("No extend needed: backup needs {} bytes, save data already has {}.", neededSize, (u64)extraData.data_size);
         }
     }
 
@@ -375,6 +589,7 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
     }
 
     std::string dstPath = "save:/";
+    logSaveSpace("after mount, before wipe");
 
     res = io::deleteFolderRecursively(dstPath.c_str(), false);
     if (R_FAILED(res)) {
@@ -391,19 +606,24 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         Logging::error("Failed to commit save wipe with result 0x{:08X}.", (u32)res);
         return {false, res, io::BackupStage::Commit};
     }
+    logSaveSpace("after wipe commit");
 
     // leave a margin under the journal size so in-flight writes never overflow
     // it; 0 (extra data unavailable) disables mid-file commits
     const u64 commitWriteLimit = journalSize > JOURNAL_COMMIT_MARGIN ? journalSize - JOURNAL_COMMIT_MARGIN : journalSize;
+    Logging::info("Copy starting with commitWriteLimit={} (journal size {}).", commitWriteLimit, journalSize);
 
+    const auto copyStart = std::chrono::steady_clock::now();
     sink.begin("Restore", fileCount);
     res = io::copyDirectory(srcPath, dstPath, sink, commitWriteLimit);
     sink.end();
+    const auto copySeconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - copyStart).count();
     if (R_FAILED(res)) {
         FileSystem::unmountDevice();
         Logging::error("Failed to copy directory {} to {} with result 0x{:08X}. Skipping...", srcPath, dstPath, res);
         return {false, res, io::BackupStage::Copy};
     }
+    Logging::info("Copy phase finished in {} s.", copySeconds);
 
     res = fsdevCommitDevice("save");
     if (R_FAILED(res)) {
@@ -411,8 +631,35 @@ io::IoOutcome io::restore(Title& title, const std::string& srcPath, ProgressSink
         Logging::error("Failed to commit save with result 0x{:08X}.", res);
         return {false, res, io::BackupStage::Commit};
     }
+    logSaveSpace("after final commit");
 
+    // Verify against a *fresh* mount, so what is compared is what actually got
+    // committed to disk — not a cached view of the writes above (#541).
     FileSystem::unmountDevice();
-    Logging::info("Restore succeeded.");
+    logSaveExtraData("after final commit", title);
+    res = SaveDataSource(title.saveDataType()).mount(title);
+    if (R_FAILED(res)) {
+        Logging::error("Failed to remount save for post-restore verification with result 0x{:08X}. Skipping verification.", (u32)res);
+        Logging::info("Restore succeeded (unverified).");
+        return {true, 0, io::BackupStage::Copy};
+    }
+
+    VerifyStats stats;
+    const auto verifyStart = std::chrono::steady_clock::now();
+    sink.begin("Verify", fileCount);
+    verifyTree(srcPath, dstPath, stats, sink);
+    scanExtraneous(dstPath, srcPath, stats);
+    sink.end();
+    const auto verifySeconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - verifyStart).count();
+    FileSystem::unmountDevice();
+
+    Logging::info("Verification: {} files checked in {} s — {} missing, {} size mismatches, {} CRC mismatches, {} unreadable, {} extraneous.",
+        stats.checked, verifySeconds, stats.missing, stats.sizeMismatch, stats.crcMismatch, stats.unreadable, stats.extraneous);
+    if (stats.problems() > 0) {
+        Logging::error("Restore verification FAILED: the data on the save does not match the backup. See mismatches above.");
+        return {false, RES_COPY_FAILED, io::BackupStage::Verify};
+    }
+
+    Logging::info("Restore succeeded (verified).");
     return {true, 0, io::BackupStage::Copy};
 }
