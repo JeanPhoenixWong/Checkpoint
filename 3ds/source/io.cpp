@@ -148,7 +148,9 @@ Result io::copyFile(
         offset += rd;
         sink.advanceBytes(offset);
     } while (!input.eof());
-    sink.finishFile();
+    if (res == 0) {
+        sink.finishFile();
+    }
 
     input.close();
     output.close();
@@ -209,7 +211,9 @@ Result io::copyPxiSaveFile(FSPXI_Archive pxiArch, FS_Archive regularArch, const 
         offset += rd;
         sink.advanceBytes(offset);
     } while (!input.eof());
-    sink.finishFile();
+    if (res == 0) {
+        sink.finishFile();
+    }
 
     input.close();
     output.close();

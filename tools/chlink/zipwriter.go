@@ -2,12 +2,15 @@ package main
 
 // Console-compatible store-mode ZIP writer.
 //
-// The console extractor (3ds/source/transfer.cpp extractZip) only accepts:
-// method 0 (store), no data descriptors (general-purpose flag bit 3 clear),
-// version 20, no zip64, no extra fields, directory entries ending in '/'.
-// Go's archive/zip emits data descriptors on some CreateHeader paths, so this
-// writer is hand-rolled, mirroring writeZip() in transfer.cpp: local header
-// with CRC backfilled after streaming, then central directory, then EOCD.
+// The console extractor (TransferProto::extractZip in common/transferprotocol.cpp)
+// requires: method 0 (store), no zip64, directory entries ending in '/', and real
+// sizes present in the local header. It now tolerates data descriptors (flag bit 3)
+// and skips over extra fields rather than rejecting them. This writer still emits
+// the strict minimum — no data descriptors, no extra fields, sizes/CRC backfilled
+// into the local header after streaming — so its output stays valid for any
+// consumer, not only the current extractor. It is hand-rolled (mirroring the
+// console sender) because Go's archive/zip emits data descriptors on some
+// CreateHeader paths: local header, then central directory, then EOCD.
 
 import (
 	"encoding/binary"

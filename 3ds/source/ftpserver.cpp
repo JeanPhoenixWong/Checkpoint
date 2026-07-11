@@ -71,6 +71,14 @@ namespace {
                 continue;
             }
 
+            // A prior LOOP_EXIT tore the core down (available=false). Nothing polls
+            // a dead core: idle until re-armed instead of hammering ftp_loop() on it
+            // every iteration for the app's lifetime.
+            if (!available.load()) {
+                svcSleepThread(100'000'000ULL); // 100 ms
+                continue;
+            }
+
             loop_status_t status = ftp_loop();
             if (status == LOOP_EXIT) {
                 // Unrecoverable socket error: stop serving but keep the thread

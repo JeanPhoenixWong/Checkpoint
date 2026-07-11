@@ -61,6 +61,9 @@ namespace {
     std::atomic_flag serverRunning = ATOMIC_FLAG_INIT;
     s32 serverSocket               = -1;
     std::atomic<bool> serverIsRunning{false};
+    // Set by exit() so an in-flight recv on any request (not just cancel-tracked
+    // uploads) breaks promptly instead of blocking teardown up to the idle timeout.
+    std::atomic<bool> serverShutdown{false};
     std::string serverAddress;
 
     Thread serverThread;
@@ -73,6 +76,10 @@ namespace {
     // sender has stalled; idleMs accumulates across empty slices to preserve the
     // overall idle timeout.
     constexpr int POLL_SLICE_MS = 1000;
+    // The header block should arrive fast on a real client; a stalled connection
+    // in the header phase shouldn't hold the single-threaded accept loop (and thus
+    // every other request) for the full body idle timeout.
+    constexpr int HEADER_TIMEOUT_MS = 5000;
 
     std::map<std::string, Server::HttpHandler> handlers;
     // Streaming upload handlers, keyed by path: {temp body file path, handler}.
@@ -84,9 +91,14 @@ namespace {
     // Blocks up to the idle timeout for readable data, polling in slices so a
     // cancel request is seen promptly. Returns bytes read (>0), 0 on a clean close
     // or idle timeout, or -1 on a cancel/poll error the caller should abandon on.
-    ssize_t pollRecv(s32 sock, char* buf, size_t len, int& idleMs, bool trackCancel)
+    ssize_t pollRecv(s32 sock, char* buf, size_t len, int& idleMs, bool trackCancel, int timeoutMs = RECV_TIMEOUT_MS)
     {
         while (true) {
+            // Server teardown aborts every read path, not only cancel-tracked ones,
+            // so a GET client stalled mid-request can't hold up app exit.
+            if (serverShutdown.load()) {
+                return -1;
+            }
             if (trackCancel && TransferStatus::cancelRequested()) {
                 return -1;
             }
@@ -100,7 +112,7 @@ namespace {
             }
             if (ready == 0) {
                 idleMs += POLL_SLICE_MS;
-                if (idleMs >= RECV_TIMEOUT_MS) {
+                if (idleMs >= timeoutMs) {
                     return 0;
                 }
                 continue;
@@ -227,7 +239,7 @@ namespace {
         int idleMs       = 0;
 
         while (true) {
-            ssize_t received = pollRecv(clientSocket, buffer.data(), buffer.size(), idleMs, false);
+            ssize_t received = pollRecv(clientSocket, buffer.data(), buffer.size(), idleMs, false, HEADER_TIMEOUT_MS);
             if (received <= 0) {
                 break;
             }
@@ -383,11 +395,18 @@ std::string Server::getAddress(void)
 
 void Server::init()
 {
+    serverShutdown.store(false);
     serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (serverSocket < 0) {
         Logging::error("Failed to create log server socket with error {}: {}", errno, strerror(errno));
         return;
     }
+
+    // Without SO_REUSEADDR a quick relaunch while port 8000 is still in TIME_WAIT
+    // makes bind() fail, silently killing both the /logs endpoints and the
+    // wireless receiver with no user-visible reason.
+    int reuse = 1;
+    setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
@@ -431,6 +450,7 @@ void Server::init()
 void Server::exit()
 {
     serverRunning.clear();
+    serverShutdown.store(true);
     if (threadValid) {
         threadWaitForExit(&serverThread);
         threadClose(&serverThread);

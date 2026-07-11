@@ -75,6 +75,29 @@ namespace {
     bool g_receiverRunning = false;
     std::atomic<bool> g_pendingRefresh{false};
     std::atomic<bool> g_receiverCompleted{false};
+    // The PIN is the sole credential gating writes into the SD tree. Bound brute
+    // force: after this many bad-token uploads the receiver shuts itself down.
+    // Reset when the receiver is (re)armed in startReceiver.
+    constexpr int MAX_AUTH_ATTEMPTS = 5;
+    std::atomic<int> g_failedAuthAttempts{0};
+
+    // A 4-digit PIN from srand(time) is trivially predictable; seed from the
+    // system CSPRNG so a LAN peer can't reconstruct it from the clock.
+    int generatePin()
+    {
+        u32 r   = 0;
+        bool ok = false;
+        if (R_SUCCEEDED(psInit())) {
+            ok = R_SUCCEEDED(PS_GenerateRandomBytes(&r, sizeof(r)));
+            psExit();
+        }
+        if (!ok) {
+            // Fallback: the high-resolution tick is far less predictable than the
+            // second-granularity clock the old srand(time) leaked.
+            r = (u32)(svcGetSystemTick() ^ osGetTime());
+        }
+        return 1000 + (int)(r % 9000);
+    }
     // Guards the receiver state shared UI<->network thread: g_token (read by the
     // server thread in handleUpload, written by the UI thread), g_receiverIp,
     // g_receiverPort, g_receiverRunning, and g_receiverNotice /
@@ -278,6 +301,13 @@ namespace {
         }
         if (!constantTimeEquals(token, expectedToken)) {
             cleanup();
+            int attempts = g_failedAuthAttempts.fetch_add(1) + 1;
+            Logging::warning("Rejected upload with invalid token ({}/{} attempts).", attempts, MAX_AUTH_ATTEMPTS);
+            if (attempts >= MAX_AUTH_ATTEMPTS) {
+                setReceiverNotice("Too many invalid PIN attempts; receiver stopped.");
+                Logging::warning("Too many invalid PIN attempts; stopping receiver.");
+                Transfer::stopReceiver();
+            }
             return {403, "application/json", "{\"ok\":false,\"error\":\"Invalid token\"}"};
         }
 
@@ -390,7 +420,13 @@ namespace {
                 io::deleteFolderRecursively(Archive::sdmc(), backupRoot);
                 cleanup();
                 std::string message = extractError.empty() ? "Failed to extract package." : extractError;
-                return {500, "application/json", "{\"ok\":false,\"error\":\"" + message + "\"}"};
+                // Build via nlohmann so a message with a quote/backslash can't
+                // produce malformed JSON (the sender would then show "no response"
+                // instead of the real cause).
+                nlohmann::json err;
+                err["ok"]    = false;
+                err["error"] = message;
+                return {500, "application/json", err.dump()};
             }
             TransferStatus::setBytesDone(fileLen);
         }
@@ -555,8 +591,8 @@ bool Transfer::startReceiver(std::string& outError)
         }
     }
 
-    srand((unsigned int)osGetTime());
-    int pin           = 1000 + (rand() % 9000);
+    g_failedAuthAttempts.store(0);
+    int pin           = generatePin();
     std::string token = StringUtils::format("%04d", pin);
     std::string ip    = Server::getAddress();
     setReceiverNotice("");

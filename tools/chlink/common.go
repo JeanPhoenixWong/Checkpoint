@@ -79,20 +79,22 @@ func validPin(pin string) bool {
 	return true
 }
 
-// sanitizeComponent approximates the console's removeForbiddenCharacters:
-// characters invalid in FAT filenames are replaced with '_', trailing
-// dots/spaces trimmed.
+// sanitizeComponent must match the console's removeForbiddenCharacters exactly,
+// or the same title lands in a differently-named folder depending on which side
+// stored the backup, breaking same-name replacement and path inference. The
+// console (common/common.cpp) replaces each of these chars with a space and then
+// trims trailing spaces — note it also strips '.', ',' and '!'.
 func sanitizeComponent(s string) string {
+	const illegal = ".,!\\/:?*\"<>|"
 	var b strings.Builder
 	for _, r := range s {
-		switch {
-		case r < 0x20, strings.ContainsRune(`<>:"/\|?*`, r):
-			b.WriteRune('_')
-		default:
+		if strings.ContainsRune(illegal, r) {
+			b.WriteRune(' ')
+		} else {
 			b.WriteRune(r)
 		}
 	}
-	out := strings.TrimRight(b.String(), ". ")
+	out := strings.TrimRight(b.String(), " ")
 	if out == "" {
 		out = "_"
 	}

@@ -1,6 +1,6 @@
 /*
- *   This file is part of PKSM
- *   Copyright (C) 2016-2025 Bernardo Giordano FlagBrew
+ *   This file is part of Checkpoint
+ *   Copyright (C) 2017-2026 Bernardo Giordano, FlagBrew
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -47,6 +47,9 @@ namespace {
 
     std::mutex logMutex;
     constexpr size_t LOG_BUFFER_SIZE = 8192;
+    // Cap the in-memory session log so it can't grow unbounded over a long session
+    // (it is copied wholesale on every /logs/memory hit). Keep a trailing window.
+    constexpr size_t APPLICATION_LOGS_CAP = 256 * 1024;
     std::string logBuffer;
     FILE* logFile = nullptr;
 
@@ -186,6 +189,13 @@ void Logging::log(LogLevel level, const std::string& message)
 
     std::lock_guard<std::mutex> lock(logMutex);
     applicationLogs += logEntry;
+    if (applicationLogs.size() > APPLICATION_LOGS_CAP) {
+        // Drop the oldest data, trimming to the next line boundary so the window
+        // never starts mid-entry.
+        size_t drop = applicationLogs.size() - APPLICATION_LOGS_CAP;
+        size_t nl   = applicationLogs.find('\n', drop);
+        applicationLogs.erase(0, nl == std::string::npos ? drop : nl + 1);
+    }
     logBuffer += logEntry;
 
     // Flush if buffer is getting full or for important messages

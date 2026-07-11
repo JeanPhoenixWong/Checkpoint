@@ -72,6 +72,11 @@ namespace {
     std::atomic<bool> g_pendingRefresh{false};
     std::atomic<bool> g_receiverCompleted{false};
     std::atomic<u64> g_completedTitleId{0};
+    // The PIN is the sole credential gating writes into the SD tree. Bound brute
+    // force: after this many bad-token uploads the receiver shuts itself down.
+    // Reset when the receiver is (re)armed in startReceiver.
+    constexpr int MAX_AUTH_ATTEMPTS = 5;
+    std::atomic<int> g_failedAuthAttempts{0};
     // Guards the receiver state shared UI<->server thread: g_token, g_receiverIp,
     // g_receiverPort, g_receiverRunning, and the notice/name strings.
     std::mutex g_receiverMutex;
@@ -289,6 +294,13 @@ namespace {
         }
         if (!constantTimeEquals(token, expectedToken)) {
             cleanup();
+            int attempts = g_failedAuthAttempts.fetch_add(1) + 1;
+            Logging::warning("Rejected upload with invalid token ({}/{} attempts).", attempts, MAX_AUTH_ATTEMPTS);
+            if (attempts >= MAX_AUTH_ATTEMPTS) {
+                setReceiverNotice("Too many invalid PIN attempts; receiver stopped.");
+                Logging::warning("Too many invalid PIN attempts; stopping receiver.");
+                Transfer::stopReceiver();
+            }
             return {403, "application/json", "{\"ok\":false,\"error\":\"Invalid token\"}"};
         }
 
@@ -553,8 +565,10 @@ bool Transfer::startReceiver(std::string& outError)
         return false;
     }
 
-    srand((unsigned int)time(nullptr));
-    int pin           = 1000 + (rand() % 9000);
+    g_failedAuthAttempts.store(0);
+    // A 4-digit PIN from srand(time) is trivially predictable; seed from the
+    // system CSPRNG so a LAN peer can't reconstruct it from the clock.
+    int pin           = 1000 + (int)(randomGet64() % 9000);
     std::string token = StringUtils::format("%04d", pin);
     std::string ip    = Server::getAddress();
     setReceiverNotice("");
