@@ -29,6 +29,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #if defined(__aarch64__)
 #include <arm_acle.h>
@@ -198,5 +199,394 @@ namespace TransferProto {
     bool validPin(const std::string& pin)
     {
         return pin.size() == 4 && std::all_of(pin.begin(), pin.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    }
+
+    uint32_t zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs)
+    {
+        uint32_t total = 22; // end of central directory
+        for (const auto& dir : dirs) {
+            total += 30 + dir.size(); // local header
+            total += 46 + dir.size(); // central directory
+        }
+        for (const auto& entry : files) {
+            total += 30 + entry.relPath.size() + entry.size + 16; // local header + data + data descriptor
+            total += 46 + entry.relPath.size();                   // central directory
+        }
+        return total;
+    }
+
+    bool parseMultipart(const std::string& head, uint64_t bodyLen, const std::string& boundary, std::string& outMeta, uint64_t& outFileOffset,
+        uint64_t& outFileLen, std::string& outError)
+    {
+        outMeta.clear();
+        outFileOffset = 0;
+        outFileLen    = 0;
+
+        std::string boundaryMarker     = "--" + boundary;
+        std::string nextBoundaryMarker = "\r\n" + boundaryMarker;
+
+        // Meta part.
+        size_t metaPos = head.find(boundaryMarker);
+        if (metaPos == std::string::npos) {
+            outError = "Missing boundary.";
+            return false;
+        }
+        // File part header.
+        size_t filePos = head.find("name=\"file\"");
+        if (filePos == std::string::npos) {
+            outError = "Incomplete form data.";
+            return false;
+        }
+        // Meta content: between the meta part's header terminator and the boundary
+        // that precedes the file part.
+        size_t metaHeaderEnd = head.find("\r\n\r\n", metaPos);
+        if (metaHeaderEnd == std::string::npos) {
+            outError = "Incomplete form data.";
+            return false;
+        }
+        size_t metaDataStart = metaHeaderEnd + 4;
+        size_t metaDataEnd   = head.find(nextBoundaryMarker, metaDataStart);
+        if (metaDataEnd == std::string::npos || metaDataEnd > filePos) {
+            outError = "Incomplete form data.";
+            return false;
+        }
+        outMeta = head.substr(metaDataStart, metaDataEnd - metaDataStart);
+
+        // File data begins right after the file part's header terminator.
+        size_t fileHeaderEnd = head.find("\r\n\r\n", filePos);
+        if (fileHeaderEnd == std::string::npos) {
+            outError = "Incomplete form data.";
+            return false;
+        }
+        uint64_t fileDataStart = (uint64_t)fileHeaderEnd + 4;
+
+        // The body ends with "\r\n--boundary--\r\n"; the file data is everything
+        // between fileDataStart and that trailing delimiter.
+        std::string trailer = "\r\n" + boundaryMarker + "--\r\n";
+        if (bodyLen < fileDataStart + trailer.size()) {
+            outError = "Incomplete form data.";
+            return false;
+        }
+        outFileOffset = fileDataStart;
+        outFileLen    = bodyLen - fileDataStart - trailer.size();
+        return true;
+    }
+
+    bool extractZip(ByteReader& in, uint64_t limit, ExtractSink& sink, const CancelFn& cancelled, const ProgressFn& onBytes, std::string& outError)
+    {
+        uint64_t consumed = 0;
+        // Reads through the raw source but never past the file part's limit; the
+        // adapter's ByteReader knows nothing about framing, so the bound lives here.
+        auto readInto = [&](void* dst, size_t n) -> size_t {
+            if (consumed + n > limit) {
+                n = (size_t)(limit - consumed);
+            }
+            if (n == 0) {
+                return 0;
+            }
+            size_t rd = in.read(dst, n);
+            consumed += rd;
+            return rd;
+        };
+
+        static const size_t kBuf = 0x40000;
+        std::unique_ptr<uint8_t[]> buf(new uint8_t[kBuf]);
+
+        bool ok = true;
+        while (consumed + 4 <= limit) {
+            uint8_t sigBuf[4];
+            if (readInto(sigBuf, 4) != 4) {
+                break;
+            }
+            uint32_t sig = (uint32_t)(sigBuf[0] | (sigBuf[1] << 8) | (sigBuf[2] << 16) | ((uint32_t)sigBuf[3] << 24));
+            if (sig != 0x04034b50) {
+                break;
+            }
+            uint8_t hdr[26];
+            if (readInto(hdr, 26) != 26) {
+                outError = "Corrupted ZIP header.";
+                ok       = false;
+                break;
+            }
+            uint16_t flags       = (uint16_t)(hdr[2] | (hdr[3] << 8));
+            uint16_t compression = (uint16_t)(hdr[4] | (hdr[5] << 8));
+            uint32_t crc         = (uint32_t)(hdr[10] | (hdr[11] << 8) | (hdr[12] << 16) | ((uint32_t)hdr[13] << 24));
+            uint32_t compSize    = (uint32_t)(hdr[14] | (hdr[15] << 8) | (hdr[16] << 16) | ((uint32_t)hdr[17] << 24));
+            uint32_t uncompSize  = (uint32_t)(hdr[18] | (hdr[19] << 8) | (hdr[20] << 16) | ((uint32_t)hdr[21] << 24));
+            uint16_t nameLen     = (uint16_t)(hdr[22] | (hdr[23] << 8));
+            uint16_t extraLen    = (uint16_t)(hdr[24] | (hdr[25] << 8));
+
+            std::string name;
+            name.resize(nameLen);
+            if (nameLen > 0 && readInto(&name[0], nameLen) != nameLen) {
+                outError = "Corrupted ZIP header.";
+                ok       = false;
+                break;
+            }
+            if (extraLen > 0) {
+                std::unique_ptr<uint8_t[]> extra(new uint8_t[extraLen]);
+                if (readInto(extra.get(), extraLen) != extraLen) {
+                    outError = "Corrupted ZIP header.";
+                    ok       = false;
+                    break;
+                }
+            }
+
+            // Data-descriptor entries (flag bit 3) are accepted as long as the
+            // local header still carries the real sizes, which is what the
+            // console senders emit when streaming a zip without staging it.
+            if (compression != 0) {
+                outError = "Unsupported ZIP compression.";
+                ok       = false;
+                break;
+            }
+            if (!isSafeZipRelativePath(name)) {
+                outError = "Invalid ZIP entry path.";
+                ok       = false;
+                break;
+            }
+
+            if (!name.empty() && name.back() == '/') {
+                if (!sink.makeDir(name)) {
+                    outError = "Failed to write extracted file.";
+                    ok       = false;
+                    break;
+                }
+                continue;
+            }
+
+            if (!sink.beginFile(name, uncompSize)) {
+                outError = "Failed to write extracted file.";
+                ok       = false;
+                break;
+            }
+
+            uint32_t computedCrc = 0xFFFFFFFFu;
+            uint32_t remaining   = compSize;
+            bool fileOk          = true;
+            while (remaining > 0) {
+                if (cancelled && cancelled()) {
+                    outError = "Transfer cancelled.";
+                    fileOk   = false;
+                    break;
+                }
+                uint32_t chunk = remaining > kBuf ? (uint32_t)kBuf : remaining;
+                size_t rd      = readInto(buf.get(), chunk);
+                if (rd == 0) {
+                    outError = "Corrupted ZIP payload.";
+                    fileOk   = false;
+                    break;
+                }
+                computedCrc = updateCrc(computedCrc, buf.get(), rd);
+                sink.writeFile(buf.get(), rd);
+                remaining -= (uint32_t)rd;
+                if (onBytes) {
+                    onBytes(rd);
+                }
+            }
+            sink.endFile();
+            if (!fileOk) {
+                ok = false;
+                break;
+            }
+
+            // With flag bit 3 the local-header CRC field is zero and the real
+            // CRC follows the data in a data descriptor (optionally prefixed
+            // with its own signature).
+            if (flags & 0x08) {
+                uint8_t desc[16];
+                if (readInto(desc, 4) != 4) {
+                    outError = "Corrupted ZIP payload.";
+                    ok       = false;
+                    break;
+                }
+                uint32_t first = (uint32_t)(desc[0] | (desc[1] << 8) | (desc[2] << 16) | ((uint32_t)desc[3] << 24));
+                if (first == 0x08074b50) {
+                    if (readInto(desc + 4, 12) != 12) {
+                        outError = "Corrupted ZIP payload.";
+                        ok       = false;
+                        break;
+                    }
+                    crc = (uint32_t)(desc[4] | (desc[5] << 8) | (desc[6] << 16) | ((uint32_t)desc[7] << 24));
+                }
+                else {
+                    if (readInto(desc + 4, 8) != 8) {
+                        outError = "Corrupted ZIP payload.";
+                        ok       = false;
+                        break;
+                    }
+                    crc = first;
+                }
+            }
+
+            // Verify the extracted data against the CRC stored in the ZIP entry,
+            // so a corrupted or truncated transfer is rejected instead of being
+            // written out as-is.
+            computedCrc ^= 0xFFFFFFFFu;
+            if (computedCrc != crc) {
+                outError = "Checksum mismatch in received file.";
+                ok       = false;
+                break;
+            }
+        }
+
+        return ok;
+    }
+
+    bool sendZipStream(ByteSink& out, const std::vector<SendFile>& files, const std::vector<std::string>& dirs, FileReader& src,
+        const CancelFn& cancelled, const ProgressFn& onBytes, bool& wasCancelled)
+    {
+        wasCancelled = false;
+
+        std::vector<ZipEntry> central;
+        central.reserve(dirs.size() + files.size());
+        uint32_t offset = 0;
+
+        auto sendChunk = [&](const void* data, size_t n) -> bool {
+            if (!out.sendAll(data, n)) {
+                return false;
+            }
+            offset += (uint32_t)n;
+            if (onBytes) {
+                onBytes(n);
+            }
+            return true;
+        };
+
+        for (const auto& dir : dirs) {
+            ZipEntry centralEntry;
+            centralEntry.name        = dir;
+            centralEntry.crc         = 0;
+            centralEntry.size        = 0;
+            centralEntry.offset      = offset;
+            centralEntry.isDirectory = true;
+
+            std::string hdr;
+            hdr.reserve(30 + dir.size());
+            appendLe32(hdr, 0x04034b50);
+            appendLe16(hdr, 20);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe32(hdr, 0);
+            appendLe16(hdr, (uint16_t)dir.size());
+            appendLe16(hdr, 0);
+            hdr.append(dir);
+            if (!sendChunk(hdr.data(), hdr.size())) {
+                return false;
+            }
+
+            central.push_back(centralEntry);
+        }
+
+        static const size_t kBuf = 0x40000;
+        std::unique_ptr<uint8_t[]> buf(new uint8_t[kBuf]);
+
+        for (const auto& entry : files) {
+            ZipEntry centralEntry;
+            centralEntry.name        = entry.relPath;
+            centralEntry.crc         = 0;
+            centralEntry.size        = entry.size;
+            centralEntry.offset      = offset;
+            centralEntry.isDirectory = false;
+
+            std::string hdr;
+            hdr.reserve(30 + entry.relPath.size());
+            appendLe32(hdr, 0x04034b50);
+            appendLe16(hdr, 20);
+            appendLe16(hdr, 0x0008); // flag bit 3: CRC in the data descriptor
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe16(hdr, 0);
+            appendLe32(hdr, 0); // CRC, carried by the data descriptor instead
+            appendLe32(hdr, entry.size);
+            appendLe32(hdr, entry.size);
+            appendLe16(hdr, (uint16_t)entry.relPath.size());
+            appendLe16(hdr, 0);
+            hdr.append(entry.relPath);
+            if (!sendChunk(hdr.data(), hdr.size())) {
+                return false;
+            }
+
+            if (!src.open(entry.absPath)) {
+                return false;
+            }
+            uint32_t crc       = 0xFFFFFFFFu;
+            uint32_t remaining = entry.size;
+            while (remaining > 0) {
+                if (cancelled && cancelled()) {
+                    src.close();
+                    wasCancelled = true;
+                    return false;
+                }
+                uint32_t chunk = remaining > kBuf ? (uint32_t)kBuf : remaining;
+                size_t rd      = src.read(buf.get(), chunk);
+                if (rd == 0) {
+                    // Short read: the promised sizes can no longer be met, so
+                    // the transfer must fail rather than desync the stream.
+                    src.close();
+                    return false;
+                }
+                crc = updateCrc(crc, buf.get(), rd);
+                if (!sendChunk(buf.get(), rd)) {
+                    src.close();
+                    return false;
+                }
+                remaining -= (uint32_t)rd;
+            }
+            src.close();
+            crc ^= 0xFFFFFFFFu;
+
+            std::string desc;
+            desc.reserve(16);
+            appendLe32(desc, 0x08074b50);
+            appendLe32(desc, crc);
+            appendLe32(desc, entry.size);
+            appendLe32(desc, entry.size);
+            if (!sendChunk(desc.data(), desc.size())) {
+                return false;
+            }
+
+            centralEntry.crc = crc;
+            central.push_back(centralEntry);
+        }
+
+        uint32_t centralOffset = offset;
+        std::string tail;
+        for (const auto& entry : central) {
+            appendLe32(tail, 0x02014b50);
+            appendLe16(tail, 20);
+            appendLe16(tail, 20);
+            appendLe16(tail, entry.isDirectory ? 0 : 0x0008);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe32(tail, entry.crc);
+            appendLe32(tail, entry.size);
+            appendLe32(tail, entry.size);
+            appendLe16(tail, (uint16_t)entry.name.size());
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe16(tail, 0);
+            appendLe32(tail, entry.isDirectory ? 0x10 : 0); // MS-DOS directory attribute (matches chlink)
+            appendLe32(tail, entry.offset);
+            tail.append(entry.name);
+        }
+
+        uint32_t centralSize = (uint32_t)tail.size();
+        appendLe32(tail, 0x06054b50);
+        appendLe16(tail, 0);
+        appendLe16(tail, 0);
+        appendLe16(tail, (uint16_t)central.size());
+        appendLe16(tail, (uint16_t)central.size());
+        appendLe32(tail, centralSize);
+        appendLe32(tail, centralOffset);
+        appendLe16(tail, 0);
+
+        return sendChunk(tail.data(), tail.size());
     }
 }

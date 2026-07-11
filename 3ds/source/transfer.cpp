@@ -49,6 +49,7 @@
 #include <memory>
 #include <mutex>
 #include <netinet/in.h>
+#include <optional>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -95,14 +96,7 @@ namespace {
         g_receiverCompletedName = name;
     }
 
-    struct FileEntry {
-        std::u16string absPath;
-        std::string relPath;
-        u32 size;
-        u32 crc;
-    };
-
-    void collectFiles(FS_Archive arch, const std::u16string& root, const std::u16string& sub, std::vector<FileEntry>& out,
+    void collectFiles(FS_Archive arch, const std::u16string& root, const std::u16string& sub, std::vector<SendFile>& out,
         std::vector<std::string>* outDirs = nullptr)
     {
         std::u16string current = root;
@@ -133,8 +127,8 @@ namespace {
                 if (!input.good()) {
                     continue;
                 }
-                FileEntry entry;
-                entry.absPath = abs;
+                SendFile entry;
+                entry.absPath = StringUtils::UTF16toUTF8(abs);
                 entry.relPath = rel;
                 entry.size    = input.size();
                 input.close();
@@ -165,252 +159,99 @@ namespace {
         return true;
     }
 
-    // Extracts a store-only ZIP that lives inside `zipPath` at [startOffset,
-    // startOffset+limit). Reading straight from the streamed multipart body at
-    // the file part's byte range avoids holding the payload in RAM or copying it
-    // to a second staging file.
-    bool extractZip(const std::u16string& zipPath, u64 startOffset, u64 limit, const std::u16string& destRoot, std::string& outError)
+    // Reads a bounded head window off the front of the streamed body so
+    // TransferProto::parseMultipart can locate the parts without scanning the
+    // (large) payload.
+    bool readBodyHead(const std::u16string& bodyPath, u64 bodyLen, std::string& outHead, std::string& outError)
     {
-        FSStream input(Archive::sdmc(), zipPath, FS_OPEN_READ);
-        if (!input.good()) {
-            outError = "Failed to open received package.";
-            return false;
-        }
-        input.offset((u32)startOffset);
-
-        u64 consumed  = 0;
-        auto readInto = [&](void* dst, size_t n) -> u32 {
-            if (consumed + n > limit) {
-                n = (size_t)(limit - consumed);
-            }
-            if (n == 0) {
-                return 0;
-            }
-            u32 rd = input.read(dst, (u32)n);
-            consumed += rd;
-            return rd;
-        };
-
-        static const u32 kBuf = 0x40000;
-        std::unique_ptr<u8[]> buf(new u8[kBuf]);
-
-        bool ok = true;
-        while (consumed + 4 <= limit) {
-            u8 sigBuf[4];
-            if (readInto(sigBuf, 4) != 4) {
-                break;
-            }
-            u32 sig = (u32)(sigBuf[0] | (sigBuf[1] << 8) | (sigBuf[2] << 16) | (sigBuf[3] << 24));
-            if (sig != 0x04034b50) {
-                break;
-            }
-            u8 hdr[26];
-            if (readInto(hdr, 26) != 26) {
-                outError = "Corrupted ZIP header.";
-                ok       = false;
-                break;
-            }
-            u16 flags       = (u16)(hdr[2] | (hdr[3] << 8));
-            u16 compression = (u16)(hdr[4] | (hdr[5] << 8));
-            u32 crc         = (u32)(hdr[10] | (hdr[11] << 8) | (hdr[12] << 16) | (hdr[13] << 24));
-            u32 compSize    = (u32)(hdr[14] | (hdr[15] << 8) | (hdr[16] << 16) | (hdr[17] << 24));
-            u32 uncompSize  = (u32)(hdr[18] | (hdr[19] << 8) | (hdr[20] << 16) | (hdr[21] << 24));
-            u16 nameLen     = (u16)(hdr[22] | (hdr[23] << 8));
-            u16 extraLen    = (u16)(hdr[24] | (hdr[25] << 8));
-
-            std::string name;
-            name.resize(nameLen);
-            if (nameLen > 0 && readInto(name.data(), nameLen) != nameLen) {
-                outError = "Corrupted ZIP header.";
-                ok       = false;
-                break;
-            }
-            if (extraLen > 0) {
-                std::unique_ptr<u8[]> extra(new u8[extraLen]);
-                if (readInto(extra.get(), extraLen) != extraLen) {
-                    outError = "Corrupted ZIP header.";
-                    ok       = false;
-                    break;
-                }
-            }
-
-            // Data-descriptor entries (flag bit 3) are accepted as long as the
-            // local header still carries the real sizes, which is what the
-            // console senders emit when streaming a zip without staging it.
-            if (compression != 0) {
-                outError = "Unsupported ZIP compression.";
-                ok       = false;
-                break;
-            }
-            if (!isSafeZipRelativePath(name)) {
-                outError = "Invalid ZIP entry path.";
-                ok       = false;
-                break;
-            }
-
-            if (!name.empty() && name.back() == '/') {
-                std::u16string dirPath = destRoot + StringUtils::UTF8toUTF16(name.c_str());
-                if (!io::directoryExists(Archive::sdmc(), dirPath)) {
-                    io::createDirectory(Archive::sdmc(), dirPath);
-                }
-                continue;
-            }
-
-            ensureDirectoryPath(destRoot, name);
-            std::u16string outPath = destRoot + StringUtils::UTF8toUTF16(name.c_str());
-            FSStream output(Archive::sdmc(), outPath, FS_OPEN_WRITE, uncompSize);
-            if (!output.good()) {
-                outError = "Failed to write extracted file.";
-                ok       = false;
-                break;
-            }
-
-            u32 computedCrc = 0xFFFFFFFFu;
-            u32 remaining   = compSize;
-            bool fileOk     = true;
-            while (remaining > 0) {
-                if (TransferStatus::cancelRequested()) {
-                    outError = "Transfer cancelled.";
-                    fileOk   = false;
-                    break;
-                }
-                u32 chunk = remaining > kBuf ? kBuf : remaining;
-                u32 rd    = readInto(buf.get(), chunk);
-                if (rd == 0) {
-                    outError = "Corrupted ZIP payload.";
-                    fileOk   = false;
-                    break;
-                }
-                computedCrc = updateCrc(computedCrc, buf.get(), rd);
-                output.write(buf.get(), rd);
-                remaining -= rd;
-                TransferStatus::addBytesDone(rd);
-            }
-            output.close();
-            if (!fileOk) {
-                ok = false;
-                break;
-            }
-
-            // With flag bit 3 the local-header CRC field is zero and the real
-            // CRC follows the data in a data descriptor (optionally prefixed
-            // with its own signature).
-            if (flags & 0x08) {
-                u8 desc[16];
-                if (readInto(desc, 4) != 4) {
-                    outError = "Corrupted ZIP payload.";
-                    ok       = false;
-                    break;
-                }
-                u32 first = (u32)(desc[0] | (desc[1] << 8) | (desc[2] << 16) | ((u32)desc[3] << 24));
-                if (first == 0x08074b50) {
-                    if (readInto(desc + 4, 12) != 12) {
-                        outError = "Corrupted ZIP payload.";
-                        ok       = false;
-                        break;
-                    }
-                    crc = (u32)(desc[4] | (desc[5] << 8) | (desc[6] << 16) | ((u32)desc[7] << 24));
-                }
-                else {
-                    if (readInto(desc + 4, 8) != 8) {
-                        outError = "Corrupted ZIP payload.";
-                        ok       = false;
-                        break;
-                    }
-                    crc = first;
-                }
-            }
-
-            // Verify the extracted data against the CRC stored in the ZIP entry,
-            // so a corrupted or truncated transfer is rejected instead of being
-            // written out as-is.
-            computedCrc ^= 0xFFFFFFFFu;
-            if (computedCrc != crc) {
-                outError = "Checksum mismatch in received file.";
-                ok       = false;
-                break;
-            }
-        }
-
-        input.close();
-        return ok;
-    }
-
-    // Locates the multipart parts inside the streamed body temp file. The meta
-    // part is small and read into RAM; the file part is returned as a byte range
-    // [outFileOffset, outFileOffset+outFileLen) into the body file, so the (large)
-    // payload is never buffered. Assumes the protocol layout: meta part first,
-    // then a single file part that is the last part before the closing delimiter.
-    bool parseMultipartFile(const std::u16string& bodyPath, u64 bodyLen, const std::string& boundary, std::string& outMeta, u64& outFileOffset,
-        u64& outFileLen, std::string& outError)
-    {
-        outMeta.clear();
-        outFileOffset = 0;
-        outFileLen    = 0;
-
         FSStream f(Archive::sdmc(), bodyPath, FS_OPEN_READ);
         if (!f.good()) {
             outError = "Failed to open upload body.";
             return false;
         }
-
-        // The meta part and both part headers sit at the very start of the body;
-        // read a bounded head window to locate them without scanning the payload.
         const u32 headWindow = 64 * 1024;
         u32 headLen          = (u32)(bodyLen < headWindow ? bodyLen : headWindow);
-        std::string head;
-        head.resize(headLen);
-        if (headLen > 0 && f.read(head.data(), headLen) != headLen) {
+        outHead.resize(headLen);
+        if (headLen > 0 && f.read(&outHead[0], headLen) != headLen) {
             f.close();
             outError = "Failed to read upload body.";
             return false;
         }
         f.close();
-
-        std::string boundaryMarker     = "--" + boundary;
-        std::string nextBoundaryMarker = "\r\n" + boundaryMarker;
-
-        size_t metaPos = head.find(boundaryMarker);
-        if (metaPos == std::string::npos) {
-            outError = "Missing boundary.";
-            return false;
-        }
-        size_t filePos = head.find("name=\"file\"");
-        if (filePos == std::string::npos) {
-            outError = "Incomplete form data.";
-            return false;
-        }
-        size_t metaHeaderEnd = head.find("\r\n\r\n", metaPos);
-        if (metaHeaderEnd == std::string::npos) {
-            outError = "Incomplete form data.";
-            return false;
-        }
-        size_t metaDataStart = metaHeaderEnd + 4;
-        size_t metaDataEnd   = head.find(nextBoundaryMarker, metaDataStart);
-        if (metaDataEnd == std::string::npos || metaDataEnd > filePos) {
-            outError = "Incomplete form data.";
-            return false;
-        }
-        outMeta = head.substr(metaDataStart, metaDataEnd - metaDataStart);
-
-        size_t fileHeaderEnd = head.find("\r\n\r\n", filePos);
-        if (fileHeaderEnd == std::string::npos) {
-            outError = "Incomplete form data.";
-            return false;
-        }
-        u64 fileDataStart = (u64)fileHeaderEnd + 4;
-
-        // The body ends with "\r\n--boundary--\r\n"; the file data is everything
-        // between fileDataStart and that trailing delimiter.
-        std::string trailer = "\r\n" + boundaryMarker + "--\r\n";
-        if (bodyLen < fileDataStart + trailer.size()) {
-            outError = "Incomplete form data.";
-            return false;
-        }
-        outFileOffset = fileDataStart;
-        outFileLen    = bodyLen - fileDataStart - trailer.size();
         return true;
     }
+
+    // ByteReader over the streamed body, positioned at the file part's start.
+    // TransferProto::extractZip owns the length accounting.
+    struct BodyReader : TransferProto::ByteReader {
+        FSStream input;
+        explicit BodyReader(const std::u16string& path, u64 startOffset) : input(Archive::sdmc(), path, FS_OPEN_READ)
+        {
+            if (input.good()) {
+                input.offset((u32)startOffset);
+            }
+        }
+        bool good() { return input.good(); }
+        ~BodyReader() override
+        {
+            if (input.good()) {
+                input.close();
+            }
+        }
+        size_t read(void* dst, size_t n) override { return input.good() ? input.read(dst, (u32)n) : 0; }
+    };
+
+    // ExtractSink writing under a u16string destination root via FSStream.
+    struct FsExtractSink : TransferProto::ExtractSink {
+        std::u16string destRoot;
+        std::optional<FSStream> output;
+        explicit FsExtractSink(std::u16string root) : destRoot(std::move(root)) {}
+        bool makeDir(const std::string& relPath) override
+        {
+            std::u16string dirPath = destRoot + StringUtils::UTF8toUTF16(relPath.c_str());
+            if (!io::directoryExists(Archive::sdmc(), dirPath)) {
+                io::createDirectory(Archive::sdmc(), dirPath);
+            }
+            return true;
+        }
+        bool beginFile(const std::string& relPath, uint32_t sizeHint) override
+        {
+            ensureDirectoryPath(destRoot, relPath);
+            std::u16string outPath = destRoot + StringUtils::UTF8toUTF16(relPath.c_str());
+            output.emplace(Archive::sdmc(), outPath, FS_OPEN_WRITE, sizeHint);
+            return output->good();
+        }
+        bool writeFile(const void* data, size_t n) override
+        {
+            output->write(data, (u32)n);
+            return true;
+        }
+        void endFile() override
+        {
+            if (output) {
+                output->close();
+                output.reset();
+            }
+        }
+    };
+
+    // FileReader opening backup files (UTF-8 abs path) via FSStream for the send.
+    struct FsFileReader : TransferProto::FileReader {
+        std::optional<FSStream> stream;
+        bool open(const std::string& absPath) override
+        {
+            stream.emplace(Archive::sdmc(), StringUtils::UTF8toUTF16(absPath.c_str()), FS_OPEN_READ);
+            return stream->good();
+        }
+        size_t read(void* dst, size_t n) override { return stream ? stream->read(dst, (u32)n) : 0; }
+        void close() override
+        {
+            if (stream) {
+                stream->close();
+                stream.reset();
+            }
+        }
+    };
 
     Server::HttpResponse handleInfo(const std::string&, const std::string&)
     {
@@ -455,7 +296,9 @@ namespace {
         u64 fileOffset = 0;
         u64 fileLen    = 0;
         std::string error;
-        if (!parseMultipartFile(bodyPath, req.bodyLength, boundary, metaJson, fileOffset, fileLen, error)) {
+        std::string head;
+        if (!readBodyHead(bodyPath, req.bodyLength, head, error) ||
+            !parseMultipart(head, req.bodyLength, boundary, metaJson, fileOffset, fileLen, error)) {
             cleanup();
             return {400, "application/json", "{\"ok\":false,\"error\":\"Bad upload\"}"};
         }
@@ -529,7 +372,14 @@ namespace {
             TransferStatus::beginNetwork("Extracting package", fileLen);
 
             std::string extractError;
-            bool extracted = extractZip(bodyPath, fileOffset, fileLen, backupRoot, extractError);
+            BodyReader reader(bodyPath, fileOffset);
+            FsExtractSink sink(backupRoot);
+            bool extracted = reader.good() && extractZip(
+                                                  reader, fileLen, sink, []() { return TransferStatus::cancelRequested(); },
+                                                  [](size_t n) { TransferStatus::addBytesDone(n); }, extractError);
+            if (!reader.good() && extractError.empty()) {
+                extractError = "Failed to open received package.";
+            }
             if (!extracted) {
                 // A failed (or cancelled) extract leaves a half-populated backup
                 // folder behind; remove it so the receiver never keeps a backup
@@ -649,168 +499,12 @@ namespace {
         return true;
     }
 
-    // Streams the store-only ZIP straight into the socket, so each backup byte
-    // is read from SD exactly once (the old path staged a temp zip: read +
-    // write + re-read). File CRCs are unknown until the data has been sent, so
-    // file entries set general-purpose flag bit 3 and carry the real CRC in a
-    // signed 16-byte data descriptor after the data; the local header still
-    // holds the real sizes (store-only makes them known upfront), which is
-    // what the console receivers rely on to frame each entry. Total byte
-    // count must match zipStreamSize exactly for Content-Length to hold.
-    bool sendZipStream(int sock, const std::vector<FileEntry>& files, const std::vector<std::string>& dirs, bool& cancelled)
-    {
-        cancelled = false;
-
-        std::vector<ZipEntry> central;
-        central.reserve(dirs.size() + files.size());
-        u32 offset = 0;
-
-        auto sendChunk = [&](const void* data, u32 n) -> bool {
-            if (!sendAll(sock, data, n)) {
-                return false;
-            }
-            offset += n;
-            TransferStatus::addBytesDone(n);
-            return true;
-        };
-
-        for (const auto& dir : dirs) {
-            ZipEntry centralEntry;
-            centralEntry.name        = dir;
-            centralEntry.crc         = 0;
-            centralEntry.size        = 0;
-            centralEntry.offset      = offset;
-            centralEntry.isDirectory = true;
-
-            std::string hdr;
-            hdr.reserve(30 + dir.size());
-            appendLe32(hdr, 0x04034b50);
-            appendLe16(hdr, 20);
-            appendLe16(hdr, 0);
-            appendLe16(hdr, 0);
-            appendLe16(hdr, 0);
-            appendLe16(hdr, 0);
-            appendLe32(hdr, 0);
-            appendLe32(hdr, 0);
-            appendLe32(hdr, 0);
-            appendLe16(hdr, (u16)dir.size());
-            appendLe16(hdr, 0);
-            hdr.append(dir);
-            if (!sendChunk(hdr.data(), hdr.size())) {
-                return false;
-            }
-
-            central.push_back(centralEntry);
-        }
-
-        static const u32 kBuf = 0x40000;
-        std::unique_ptr<u8[]> buf(new u8[kBuf]);
-
-        for (const auto& entry : files) {
-            ZipEntry centralEntry;
-            centralEntry.name        = entry.relPath;
-            centralEntry.crc         = 0;
-            centralEntry.size        = entry.size;
-            centralEntry.offset      = offset;
-            centralEntry.isDirectory = false;
-
-            std::string hdr;
-            hdr.reserve(30 + entry.relPath.size());
-            appendLe32(hdr, 0x04034b50);
-            appendLe16(hdr, 20);
-            appendLe16(hdr, 0x0008); // flag bit 3: CRC in the data descriptor
-            appendLe16(hdr, 0);
-            appendLe16(hdr, 0);
-            appendLe16(hdr, 0);
-            appendLe32(hdr, 0); // CRC, carried by the data descriptor instead
-            appendLe32(hdr, entry.size);
-            appendLe32(hdr, entry.size);
-            appendLe16(hdr, (u16)entry.relPath.size());
-            appendLe16(hdr, 0);
-            hdr.append(entry.relPath);
-            if (!sendChunk(hdr.data(), hdr.size())) {
-                return false;
-            }
-
-            FSStream input(Archive::sdmc(), entry.absPath, FS_OPEN_READ);
-            if (!input.good()) {
-                return false;
-            }
-            u32 crc       = 0xFFFFFFFFu;
-            u32 remaining = entry.size;
-            while (remaining > 0) {
-                if (TransferStatus::cancelRequested()) {
-                    input.close();
-                    cancelled = true;
-                    return false;
-                }
-                u32 chunk = remaining > kBuf ? kBuf : remaining;
-                u32 rd    = input.read(buf.get(), chunk);
-                if (rd == 0) {
-                    // Short read: the promised sizes can no longer be met, so
-                    // the transfer must fail rather than desync the stream.
-                    input.close();
-                    return false;
-                }
-                crc = updateCrc(crc, buf.get(), rd);
-                if (!sendChunk(buf.get(), rd)) {
-                    input.close();
-                    return false;
-                }
-                remaining -= rd;
-            }
-            input.close();
-            crc ^= 0xFFFFFFFFu;
-
-            std::string desc;
-            desc.reserve(16);
-            appendLe32(desc, 0x08074b50);
-            appendLe32(desc, crc);
-            appendLe32(desc, entry.size);
-            appendLe32(desc, entry.size);
-            if (!sendChunk(desc.data(), desc.size())) {
-                return false;
-            }
-
-            centralEntry.crc = crc;
-            central.push_back(centralEntry);
-        }
-
-        u32 centralOffset = offset;
-        std::string tail;
-        for (const auto& entry : central) {
-            appendLe32(tail, 0x02014b50);
-            appendLe16(tail, 20);
-            appendLe16(tail, 20);
-            appendLe16(tail, entry.isDirectory ? 0 : 0x0008);
-            appendLe16(tail, 0);
-            appendLe16(tail, 0);
-            appendLe16(tail, 0);
-            appendLe32(tail, entry.crc);
-            appendLe32(tail, entry.size);
-            appendLe32(tail, entry.size);
-            appendLe16(tail, (u16)entry.name.size());
-            appendLe16(tail, 0);
-            appendLe16(tail, 0);
-            appendLe16(tail, 0);
-            appendLe16(tail, 0);
-            appendLe32(tail, entry.isDirectory ? (((u32)FS_ATTRIBUTE_DIRECTORY) << 16) : 0);
-            appendLe32(tail, entry.offset);
-            tail.append(entry.name);
-        }
-
-        u32 centralSize = (u32)tail.size();
-        appendLe32(tail, 0x06054b50);
-        appendLe16(tail, 0);
-        appendLe16(tail, 0);
-        appendLe16(tail, (u16)central.size());
-        appendLe16(tail, (u16)central.size());
-        appendLe32(tail, centralSize);
-        appendLe32(tail, centralOffset);
-        appendLe16(tail, 0);
-
-        return sendChunk(tail.data(), tail.size());
-    }
+    // ByteSink over the poll-gated send socket for TransferProto::sendZipStream.
+    struct SocketByteSink : TransferProto::ByteSink {
+        int sock;
+        explicit SocketByteSink(int s) : sock(s) {}
+        bool sendAll(const void* data, size_t len) override { return ::sendAll(sock, data, len); }
+    };
 }
 
 void Transfer::sweepTempFiles(void)
@@ -976,7 +670,7 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
         ~StatusGuard() { TransferStatus::end(); }
     } statusGuard;
 
-    std::vector<FileEntry> files;
+    std::vector<SendFile> files;
     std::vector<std::string> dirs;
     collectFiles(Archive::sdmc(), backupPath, StringUtils::UTF8toUTF16(""), files, &dirs);
     if (files.empty() && dirs.empty()) {
@@ -996,10 +690,10 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
         payloadSize = zipStreamSize(files, dirs);
     }
     else {
-        const FileEntry& entry = files.front();
-        payloadPath            = entry.absPath;
-        payloadName            = entry.relPath;
-        payloadSize            = entry.size;
+        const SendFile& entry = files.front();
+        payloadPath           = StringUtils::UTF8toUTF16(entry.absPath.c_str());
+        payloadName           = entry.relPath;
+        payloadSize           = entry.size;
     }
 
     TransferStatus::beginNetwork("Sending backup", payloadSize);
@@ -1052,10 +746,6 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
         ~SockGuard() { close(fd); }
     } sockGuard{sock};
 
-    // Non-blocking for the socket's whole lifetime; every send/recv is poll-gated
-    // below so a half-open peer can't block forever.
-    fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
-
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -1063,20 +753,18 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
     if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) {
         return SendOutcome{false, SendStage::Resolve, ""};
     }
+    // Connect while still blocking. The 3DS SOC layer does not reliably report
+    // EINPROGRESS / SO_ERROR for a non-blocking connect (server.cpp forces its
+    // client socket blocking for the same reason), so the poll(POLLOUT)+SO_ERROR
+    // dance bailed out immediately on every attempt. Only the reachable-host case
+    // matters here; the send/recv poll timeouts below still guard a stalled peer.
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-        if (errno != EINPROGRESS) {
-            return SendOutcome{false, SendStage::Connect, ""};
-        }
-        // Bounded wait for the connection to complete, then confirm via SO_ERROR.
-        if (pollSocket(sock, POLLOUT, NET_TIMEOUT_MS) <= 0) {
-            return SendOutcome{false, SendStage::Connect, ""};
-        }
-        int soErr        = 0;
-        socklen_t optLen = sizeof(soErr);
-        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &soErr, &optLen) != 0 || soErr != 0) {
-            return SendOutcome{false, SendStage::Connect, ""};
-        }
+        return SendOutcome{false, SendStage::Connect, ""};
     }
+
+    // Non-blocking only from here on; every send/recv below is poll-gated so a
+    // half-open peer can't block forever.
+    fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
 
     std::string header = StringUtils::format("POST /transfer/upload HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n", ip.c_str(), port);
     header += StringUtils::format("X-CP-Token: %s\r\n", token.c_str());
@@ -1088,7 +776,11 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
 
     if (ok && isZip) {
         bool cancelled = false;
-        if (!sendZipStream(sock, files, dirs, cancelled)) {
+        SocketByteSink sink(sock);
+        FsFileReader reader;
+        if (!sendZipStream(
+                sink, files, dirs, reader, []() { return TransferStatus::cancelRequested(); }, [](size_t n) { TransferStatus::addBytesDone(n); },
+                cancelled)) {
             if (cancelled) {
                 // The scope guard closes the socket, dropping the connection,
                 // which the receiver treats as an aborted request.

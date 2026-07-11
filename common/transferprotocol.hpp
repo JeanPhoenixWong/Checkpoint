@@ -28,6 +28,7 @@
 #define TRANSFERPROTOCOL_HPP
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,24 +59,18 @@ namespace TransferProto {
     void appendLe16(std::string& out, uint16_t v);
     void appendLe32(std::string& out, uint32_t v);
 
+    // One file queued for the send path. Paths are UTF-8; the 3DS adapter
+    // converts `absPath` to UTF-16 when it opens the file, so the shared code
+    // never sees a platform string type.
+    struct SendFile {
+        std::string absPath;
+        std::string relPath;
+        uint32_t size;
+    };
+
     // Exact byte size of the store-only zip that sendZipStream emits, used as the
     // streamed HTTP Content-Length. Store-only entries make this deterministic.
-    // Templated over the per-target file-entry type (needs `.relPath` and
-    // `.size`) so the platform's absolute-path member can be whatever it needs.
-    template <class FileEntryT>
-    uint32_t zipStreamSize(const std::vector<FileEntryT>& files, const std::vector<std::string>& dirs)
-    {
-        uint32_t total = 22; // end of central directory
-        for (const auto& dir : dirs) {
-            total += 30 + dir.size(); // local header
-            total += 46 + dir.size(); // central directory
-        }
-        for (const auto& entry : files) {
-            total += 30 + entry.relPath.size() + entry.size + 16; // local header + data + data descriptor
-            total += 46 + entry.relPath.size();                   // central directory
-        }
-        return total;
-    }
+    uint32_t zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs);
 
     // Rejects a zip entry name that is absolute, contains a backslash or colon,
     // or traverses out of the destination via a ".." component. Applied to every
@@ -99,6 +94,73 @@ namespace TransferProto {
 
     // True iff `pin` is exactly 4 ASCII digits (the receiver token format).
     bool validPin(const std::string& pin);
+
+    // ---- IO seam ----------------------------------------------------------
+    // The framing algorithms below are pure protocol; every filesystem and
+    // socket touch goes through one of these interfaces, implemented once per
+    // target (FSStream/u16string on 3DS, FILE*/string on Switch) and — for
+    // tests — against in-memory buffers.
+
+    // Sequential byte source over the received multipart body. The adapter has
+    // already positioned it at the file part's start; extractZip owns the
+    // length accounting, so read() may return fewer bytes at EOF/error.
+    struct ByteReader {
+        virtual ~ByteReader()                    = default;
+        virtual size_t read(void* dst, size_t n) = 0;
+    };
+
+    // Destination for extracted zip entries, addressed by UTF-8 relative path
+    // under a destination root the adapter already holds. beginFile opens the
+    // next file (creating parent directories); writeFile/endFile stream it.
+    struct ExtractSink {
+        virtual ~ExtractSink()                                                = default;
+        virtual bool makeDir(const std::string& relPath)                      = 0;
+        virtual bool beginFile(const std::string& relPath, uint32_t sizeHint) = 0;
+        virtual bool writeFile(const void* data, size_t n)                    = 0;
+        virtual void endFile()                                                = 0;
+    };
+
+    // Source of a backup's files while streaming the send zip, addressed by the
+    // UTF-8 absolute path stored on each SendFile.
+    struct FileReader {
+        virtual ~FileReader()                         = default;
+        virtual bool open(const std::string& absPath) = 0;
+        virtual size_t read(void* dst, size_t n)      = 0;
+        virtual void close()                          = 0;
+    };
+
+    // Byte sink for the send socket; the poll-gated sendAll lives in the adapter.
+    struct ByteSink {
+        virtual ~ByteSink()                                = default;
+        virtual bool sendAll(const void* data, size_t len) = 0;
+    };
+
+    // Polled between chunks/files: return true to abort the transfer.
+    using CancelFn = std::function<bool()>;
+    // Called with each chunk's byte count so the UI can advance the progress bar.
+    using ProgressFn = std::function<void(size_t)>;
+
+    // ---- protocol algorithms over the seam --------------------------------
+
+    // Locate the meta part (returned in outMeta) and the file part's byte range
+    // within a multipart body, given a head window the adapter already read.
+    // Assumes the layout the console senders emit: meta part first, then a
+    // single file part that is the last part before the closing delimiter.
+    bool parseMultipart(const std::string& head, uint64_t bodyLen, const std::string& boundary, std::string& outMeta, uint64_t& outFileOffset,
+        uint64_t& outFileLen, std::string& outError);
+
+    // Extract a store-only zip streamed through `in`, bounded to `limit` bytes.
+    // Verifies each entry's CRC against the stored value (data descriptor or
+    // local header). Returns false + outError on corruption, IO failure, or when
+    // `cancelled()` fires. `onBytes` reports progress per data chunk.
+    bool extractZip(ByteReader& in, uint64_t limit, ExtractSink& sink, const CancelFn& cancelled, const ProgressFn& onBytes, std::string& outError);
+
+    // Stream the store-only zip for `files` + `dirs` into `out`, reading file
+    // data through `src`. Total byte count matches zipStreamSize exactly, so the
+    // caller's Content-Length holds. Sets `wasCancelled` and returns false if
+    // `cancelled()` fired mid-stream; returns false without it on IO/send error.
+    bool sendZipStream(ByteSink& out, const std::vector<SendFile>& files, const std::vector<std::string>& dirs, FileReader& src,
+        const CancelFn& cancelled, const ProgressFn& onBytes, bool& wasCancelled);
 }
 
 #endif
