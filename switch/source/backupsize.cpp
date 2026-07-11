@@ -110,8 +110,11 @@ void BackupSizeCache::workerLoop(void)
             if (mStop.load()) {
                 return;
             }
-            task = std::move(mQueue.front());
-            mQueue.pop_front();
+            // LIFO: take the most recently queued task. While browsing the title list
+            // this computes the size for the title the user just landed on before the
+            // now-unfocused ones queued earlier.
+            task = std::move(mQueue.back());
+            mQueue.pop_back();
         }
         compute(task.first, task.second);
     }

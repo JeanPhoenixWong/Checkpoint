@@ -112,8 +112,11 @@ namespace {
                     return Task{nullptr, nullptr};
                 }
                 else {
-                    Task ret = tasks.get()[0];
-                    tasks->erase(tasks->begin());
+                    // LIFO: pop the most recently queued task. While browsing the title
+                    // list this hands a worker the folder-size job for the title the user
+                    // just landed on before the now-unfocused ones queued earlier.
+                    Task ret = tasks->back();
+                    tasks->pop_back();
                     return ret;
                 }
             });
