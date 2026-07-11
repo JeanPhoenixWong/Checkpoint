@@ -416,13 +416,13 @@ void MainScreen::draw() const
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
-            // Send sits above Backup/Restore. Always shown in its slot, but greyed
-            // (disabled) unless a highlighted existing backup can be sent — i.e.
-            // it stays inactive while the "New..." or "Receive" rows are hovered
-            // (touch-only: every face/shoulder button is bound).
+            // Send sits above Backup/Restore, bound to ZR. Always shown in its
+            // slot, but greyed (disabled) unless a highlighted existing backup can
+            // be sent — i.e. it stays inactive while the "New..." or "Receive" rows
+            // are hovered.
             if (Configuration::getInstance().isTransferEnabled()) {
                 const bool sendCtx = backupScrollEnabled && backupList->index() != 0 && !backupList->isReceiveRow(backupList->index());
-                drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "", sendCtx, BTN_W, sendCtx);
+                drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "ZR", sendCtx, BTN_W, sendCtx);
             }
             drawActionButton(COL_X, BTN_BACKUP_Y, i18n::t("main.backup"), "L", true);
             drawActionButton(COL_X, BTN_RESTORE_Y, i18n::t("main.restore"), "R", false);
@@ -793,8 +793,14 @@ void MainScreen::handleEvents(const InputState& input)
         setSaveTypeFilter(SaveKind::next(mSaveTypeFilter));
     }
 
-    if (mSaveTypeFilter == FILTER_SAVES) {
-        if (kdown & HidNpadButton_ZL || kdown & HidNpadButton_ZR) {
+    // The account picker rebuilds the title list, so it stays out of the backup
+    // list: switching users there would leave the open list pointing at a title of
+    // the previous account (same as the avatar button, which is title-grid only).
+    if (mSaveTypeFilter == FILTER_SAVES && !backupScrollEnabled) {
+        // ZR is the Send button when wireless transfer is on, so the account
+        // picker keeps ZL alone there.
+        const u64 accountKeys = Configuration::getInstance().isTransferEnabled() ? HidNpadButton_ZL : (HidNpadButton_ZL | HidNpadButton_ZR);
+        if (kdown & accountKeys) {
             while ((g_currentUId = Account::selectAccount()) == 0)
                 ;
             this->index(TITLES, 0);
@@ -957,13 +963,13 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
 
-    // Wireless Send touch button (gated behind the setting). Receive is now a row
-    // inside the backup list (handled by the A/touch path above). Send fires only
-    // when an existing backup is highlighted, so the "select a backup first" info
-    // box never appears.
+    // Wireless Send, on ZR or its touch button (gated behind the setting). Receive
+    // is now a row inside the backup list (handled by the A/touch path above). Send
+    // fires only when an existing backup is highlighted, so the "select a backup
+    // first" info box never appears.
     if (Configuration::getInstance().isTransferEnabled()) {
         const size_t row = this->index(CELLS);
-        if (backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row) && buttonSend->released()) {
+        if (backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row) && (buttonSend->released() || (kdown & HidNpadButton_ZR))) {
             startTransferSend();
             return;
         }
