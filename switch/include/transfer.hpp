@@ -76,7 +76,7 @@ namespace Transfer {
     // status line), never Checkpoint-authored prose.
     // Cancelled is not an error: the user asked to stop (hold B), so the screen
     // shows a neutral info message instead of an error overlay.
-    enum class SendStage { EmptyBackup, Zip, Socket, Resolve, Connect, Send, Response, Cancelled };
+    enum class SendStage { EmptyBackup, PayloadTooLarge, Zip, Socket, Resolve, Connect, Send, Response, Cancelled };
 
     struct SendOutcome {
         bool ok         = false;

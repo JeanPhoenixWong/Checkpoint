@@ -201,16 +201,19 @@ namespace TransferProto {
         return pin.size() == 4 && std::all_of(pin.begin(), pin.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
     }
 
-    uint32_t zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs)
+    std::optional<uint64_t> zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs)
     {
-        uint32_t total = 22; // end of central directory
+        uint64_t total = 22; // end of central directory
         for (const auto& dir : dirs) {
             total += 30 + dir.size(); // local header
             total += 46 + dir.size(); // central directory
         }
         for (const auto& entry : files) {
-            total += 30 + entry.relPath.size() + entry.size + 16; // local header + data + data descriptor
-            total += 46 + entry.relPath.size();                   // central directory
+            total += 30 + entry.relPath.size() + (uint64_t)entry.size + 16; // local header + data + data descriptor
+            total += 46 + entry.relPath.size();                             // central directory
+        }
+        if (total > kZipMaxSize) {
+            return std::nullopt;
         }
         return total;
     }

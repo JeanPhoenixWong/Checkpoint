@@ -686,8 +686,12 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
     u32 payloadSize = 0;
 
     if (isZip) {
+        std::optional<u64> zipSize = zipStreamSize(files, dirs);
+        if (!zipSize) {
+            return SendOutcome{false, SendStage::PayloadTooLarge, ""};
+        }
         payloadName = "backup.zip";
-        payloadSize = zipStreamSize(files, dirs);
+        payloadSize = (u32)*zipSize; // checked <= kZipMaxSize above
     }
     else {
         const SendFile& entry = files.front();
@@ -734,7 +738,11 @@ Transfer::SendOutcome Transfer::sendBackup(const Title& title, const std::u16str
 
     std::string partEnd = "\r\n--" + boundary + "--\r\n";
 
-    u32 contentLength = partMeta.size() + partFileHeader.size() + payloadSize + partEnd.size();
+    u64 contentLength64 = (u64)partMeta.size() + partFileHeader.size() + payloadSize + partEnd.size();
+    if (contentLength64 > TransferProto::kZipMaxSize) {
+        return SendOutcome{false, SendStage::PayloadTooLarge, ""};
+    }
+    u32 contentLength = (u32)contentLength64;
 
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (sock < 0) {

@@ -99,7 +99,10 @@ namespace {
         return (u64)st.st_size;
     }
 
-    void collectFiles(const std::string& root, const std::string& sub, std::vector<SendFile>& out, std::vector<std::string>* outDirs = nullptr)
+    // Returns false if any regular file exceeds the store-zip entry limit; such a
+    // file cannot be framed (no zip64) and the whole send must refuse rather than
+    // truncate the size to u32.
+    bool collectFiles(const std::string& root, const std::string& sub, std::vector<SendFile>& out, std::vector<std::string>* outDirs = nullptr)
     {
         std::string current = root;
         if (!current.empty() && current.back() != '/') {
@@ -108,8 +111,9 @@ namespace {
         current += sub;
         Directory items(current);
         if (!items.good()) {
-            return;
+            return true;
         }
+        bool ok = true;
         for (size_t i = 0, sz = items.size(); i < sz; i++) {
             std::string name = items.entry(i);
             if (name == "." || name == "..") {
@@ -120,16 +124,24 @@ namespace {
                 if (outDirs != nullptr) {
                     outDirs->push_back(nextSub);
                 }
-                collectFiles(root, nextSub, out, outDirs);
+                if (!collectFiles(root, nextSub, out, outDirs)) {
+                    ok = false;
+                }
             }
             else {
                 SendFile entry;
                 entry.absPath = current + name;
                 entry.relPath = sub + name;
-                entry.size    = (u32)fileSize(entry.absPath);
+                u64 sz64      = fileSize(entry.absPath);
+                if (sz64 > TransferProto::kZipMaxSize) {
+                    ok = false;
+                    continue;
+                }
+                entry.size = (u32)sz64;
                 out.push_back(entry);
             }
         }
+        return ok;
     }
 
     void ensureDirectoryPath(const std::string& base, const std::string& relPath)
@@ -667,7 +679,9 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
 
     std::vector<SendFile> files;
     std::vector<std::string> dirs;
-    collectFiles(backupPath, "", files, &dirs);
+    if (!collectFiles(backupPath, "", files, &dirs)) {
+        return SendOutcome{false, SendStage::PayloadTooLarge, ""};
+    }
     if (files.empty() && dirs.empty()) {
         return SendOutcome{false, SendStage::EmptyBackup, ""};
     }
@@ -681,8 +695,12 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
     u32 payloadSize = 0;
 
     if (isZip) {
+        std::optional<u64> zipSize = zipStreamSize(files, dirs);
+        if (!zipSize) {
+            return SendOutcome{false, SendStage::PayloadTooLarge, ""};
+        }
         payloadName = "backup.zip";
-        payloadSize = zipStreamSize(files, dirs);
+        payloadSize = (u32)*zipSize; // checked <= kZipMaxSize above
     }
     else {
         const SendFile& entry = files.front();
@@ -729,7 +747,11 @@ Transfer::SendOutcome Transfer::sendBackup(Title& title, const std::string& back
 
     std::string partEnd = "\r\n--" + boundary + "--\r\n";
 
-    u32 contentLength = partMeta.size() + partFileHeader.size() + payloadSize + partEnd.size();
+    u64 contentLength64 = (u64)partMeta.size() + partFileHeader.size() + payloadSize + partEnd.size();
+    if (contentLength64 > TransferProto::kZipMaxSize) {
+        return SendOutcome{false, SendStage::PayloadTooLarge, ""};
+    }
+    u32 contentLength = (u32)contentLength64;
 
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (sock < 0) {

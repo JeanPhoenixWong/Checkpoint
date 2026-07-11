@@ -181,6 +181,8 @@ namespace {
     std::string sendErrorMessage(const Transfer::SendOutcome& outcome)
     {
         switch (outcome.stage) {
+            case Transfer::SendStage::PayloadTooLarge:
+                return i18n::t("outcome.send_too_large");
             case Transfer::SendStage::Zip:
                 return i18n::t("outcome.send_zip");
             case Transfer::SendStage::Socket:

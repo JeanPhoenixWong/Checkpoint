@@ -1239,6 +1239,16 @@
     "nl": "Kon back-uppakket niet maken.",
     "ja": "バックアップパッケージの作成に失敗しました。"
   },
+  "outcome.send_too_large": {
+    "en": "Backup too large to send (over 4 GiB).",
+    "it": "Backup troppo grande da inviare (oltre 4 GiB).",
+    "es": "Copia demasiado grande para enviar (más de 4 GiB).",
+    "fr": "Sauvegarde trop volumineuse à envoyer (plus de 4 Gio).",
+    "de": "Backup zu groß zum Senden (über 4 GiB).",
+    "pt": "Backup grande demais para enviar (mais de 4 GiB).",
+    "nl": "Back-up te groot om te verzenden (meer dan 4 GiB).",
+    "ja": "バックアップが大きすぎて送信できません (4 GiB超)。"
+  },
   "outcome.send_socket": {
     "en": "Failed to open socket.",
     "it": "Impossibile aprire il socket.",

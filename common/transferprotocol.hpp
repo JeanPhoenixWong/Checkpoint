@@ -68,9 +68,19 @@ namespace TransferProto {
         uint32_t size;
     };
 
+    // Largest size a store-only zip can frame. There are no zip64 records in the
+    // store-only archives the console senders emit, so a single entry or the
+    // whole stream exceeding 0xFFFFFFFF cannot be represented — the send path
+    // must refuse rather than let the size wrap to u32 and desync framing.
+    static constexpr uint64_t kZipMaxSize = 0xFFFFFFFFull;
+
     // Exact byte size of the store-only zip that sendZipStream emits, used as the
     // streamed HTTP Content-Length. Store-only entries make this deterministic.
-    uint32_t zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs);
+    // Computed in u64 and returns nullopt when the total exceeds kZipMaxSize, so
+    // an oversized backup fails cleanly instead of wrapping (mirrors the refusal
+    // in tools/chlink/zipwriter.go). Each SendFile.size must already be within
+    // kZipMaxSize — the adapter's file collector enforces the per-entry bound.
+    std::optional<uint64_t> zipStreamSize(const std::vector<SendFile>& files, const std::vector<std::string>& dirs);
 
     // Rejects a zip entry name that is absolute, contains a backslash or colon,
     // or traverses out of the destination via a ".." component. Applied to every

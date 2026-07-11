@@ -60,6 +60,8 @@ std::string OutcomeMessages::restoreError(io::BackupStage stage, const std::stri
 std::string OutcomeMessages::sendError(const Transfer::SendOutcome& outcome)
 {
     switch (outcome.stage) {
+        case Transfer::SendStage::PayloadTooLarge:
+            return i18n::t("outcome.send_too_large");
         case Transfer::SendStage::Zip:
             return i18n::t("outcome.send_zip");
         case Transfer::SendStage::Socket:
