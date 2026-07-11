@@ -953,6 +953,33 @@ void Gfx::DrawRect(int x, int y, int w, int h, Color color)
     pushQuad(s_white, x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color);
 }
 
+void Gfx::DrawRectGradientV(int x, int y, int w, int h, Color top, Color bottom)
+{
+    frameBegin();
+    // Always blended: the whole point of the ramp is a varying alpha edge.
+    beginBatch(BatchMode::Quad, s_white->descId, false);
+    if (s_vtxCount + VERTS_PER_QUAD > MAX_VERTS) {
+        if (!s_vtxOverflowed) {
+            Logging::error("deko3d: vertex ring full ({} quads), dropping draws this frame.", MAX_QUADS);
+            s_vtxOverflowed = true;
+        }
+        return;
+    }
+    const float fx = (float)x, fy = (float)y, fw = (float)w, fh = (float)h;
+    const Vertex tl{fx, fy, 0.0f, 0.0f, {top.r, top.g, top.b, top.a}};
+    const Vertex tr{fx + fw, fy, 1.0f, 0.0f, {top.r, top.g, top.b, top.a}};
+    const Vertex bl{fx, fy + fh, 0.0f, 1.0f, {bottom.r, bottom.g, bottom.b, bottom.a}};
+    const Vertex br{fx + fw, fy + fh, 1.0f, 1.0f, {bottom.r, bottom.g, bottom.b, bottom.a}};
+    Vertex* out = s_vtxBase + s_vtxCount;
+    out[0]      = tl;
+    out[1]      = bl;
+    out[2]      = br;
+    out[3]      = tl;
+    out[4]      = br;
+    out[5]      = tr;
+    s_vtxCount += VERTS_PER_QUAD;
+}
+
 void Gfx::FillRoundRect(int x, int y, int w, int h, float radius, Color color)
 {
     if (w <= 0 || h <= 0) {

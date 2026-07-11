@@ -30,10 +30,10 @@
 #include "BackupList.hpp"
 #include "ErrorOverlay.hpp"
 #include "InfoOverlay.hpp"
+#include "InputState.hpp"
 #include "Screen.hpp"
 #include "YesNoOverlay.hpp"
 #include "clickable.hpp"
-#include "hid.hpp"
 #include "io.hpp"
 #include "main.hpp"
 #include "multiselection.hpp"
@@ -56,6 +56,13 @@ public:
 protected:
     int selectorX(size_t i) const;
     int selectorY(size_t i) const;
+    // Vertical-scroll grid cursor: D-pad moves the cursor over the full
+    // filtered list (up/down by a row, left/right by one) with held-key
+    // repeat; the 3-row window scrolls to keep the cursor row fully visible.
+    void updateGridCursor(const InputState& input, size_t count);
+    // Clamp mScrollRow so the cursor row is inside the 3 fully visible rows
+    // (and never past the end of the list).
+    void scrollToCursor(size_t count);
     void updateSelector(const InputState& input);
     void handleEvents(const InputState& input);
     std::string nameFromCell(size_t index) const;
@@ -86,7 +93,11 @@ private:
     // Last catalog generation the selector reconciled against; a bump means
     // titles were hidden/shown and the cursor/selection must be clamped.
     u32 mLastGeneration = 0;
-    Hid<HidDirection::HORIZONTAL, HidDirection::HORIZONTAL> hid;
+    // Grid cursor over the full filtered title list (not page-local) and the
+    // first fully visible row of the scrolled 5-column grid.
+    size_t mCursor    = 0;
+    int mScrollRow    = 0;
+    u64 mLastMoveTick = 0; // held-D-pad repeat timing
     std::unique_ptr<BackupList> backupList;
     std::unique_ptr<Clickable> buttonBackup, buttonRestore;
     // Wireless Send touch button (drawn/handled only when the transfer setting is

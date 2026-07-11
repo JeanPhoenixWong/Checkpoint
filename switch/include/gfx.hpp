@@ -46,6 +46,9 @@ namespace Gfx {
 
     void ClearScreen(Color color);
     void DrawRect(int x, int y, int w, int h, Color color);
+    // Axis-aligned rect with a vertical color ramp: `top` on the top edge,
+    // `bottom` on the bottom edge (used for the grid's bottom fade-out).
+    void DrawRectGradientV(int x, int y, int w, int h, Color top, Color bottom);
     void DrawText(int size, int x, int y, Color color, const char* text, FontFamily family = FontFamily::Sans);
     void LoadImage(Texture** texture, const char* path);
     void LoadImage(Texture** texture, u8* buff, size_t size);

@@ -61,10 +61,13 @@ namespace {
     constexpr int AVATAR_Y        = 610;
 
     // Title grid: origin 100,76; 5 columns of 142px tiles, 12px gap →
-    // 154px pitch; 3 rows visible per page (15 tiles).
+    // 154px pitch. The grid scrolls vertically: 3 rows are fully visible and
+    // a 4th row peeks past the viewport bottom (674, the hint bar top), faded
+    // out by a gradient as a scroll affordance — 4 full rows would not fit
+    // (76 + 3*154 + 142 = 680 > 674).
     constexpr int GRID_COLS        = 5;
-    constexpr int GRID_ROWS        = 3;
-    constexpr int GRID_VISIBLE     = GRID_COLS * GRID_ROWS;
+    constexpr int GRID_FULL_ROWS   = 3; // rows the cursor can occupy
+    constexpr int GRID_DRAW_ROWS   = 4; // fully visible rows + faded partial row
     constexpr int TILE             = 142;
     constexpr int TILE_PITCH       = 154;
     constexpr int BADGE_GLYPH_SIZE = 14; // ★/✓ badge marks, centered in the 24px badge
@@ -72,6 +75,16 @@ namespace {
     constexpr int GRID_Y0          = 76;
     constexpr int GRID_AREA_X      = RAIL_W;
     constexpr int GRID_AREA_W      = 800;
+    constexpr int GRID_BOTTOM      = UiKit::HINTBAR_Y; // grid viewport bottom edge
+    // Bottom fade-out: transparent at the top of the partial row, opaque
+    // background at the viewport bottom, so the cut-off row reads as "more
+    // below" instead of a glitch.
+    constexpr int GRID_FADE_Y = GRID_Y0 + GRID_FULL_ROWS * TILE_PITCH; // 538
+    constexpr int GRID_FADE_H = GRID_BOTTOM - GRID_FADE_Y;             // 136
+
+    // Held-D-pad repeat interval for the grid cursor (~156 ms, the same feel
+    // as the old IHid-based selector).
+    constexpr u64 GRID_REPEAT_TICKS = 3000000;
 
     // Right panel: 400px column with an inner 360px content column.
     constexpr int PANEL_X       = 880;
@@ -201,7 +214,7 @@ namespace {
     }
 }
 
-MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, input)
+MainScreen::MainScreen(const InputState&)
 {
     selectionTimer = 0;
     snprintf(ver, sizeof(ver), "v%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_MICRO);
@@ -226,14 +239,83 @@ MainScreen::MainScreen(const InputState& input) : hid(GRID_VISIBLE, GRID_COLS, i
 
 int MainScreen::selectorX(size_t i) const
 {
-    const int col = (int)((i % GRID_VISIBLE) % GRID_COLS);
+    const int col = (int)(i % GRID_COLS);
     return GRID_X0 + col * TILE_PITCH;
 }
 
 int MainScreen::selectorY(size_t i) const
 {
-    const int row = (int)((i % GRID_VISIBLE) / GRID_COLS);
-    return GRID_Y0 + row * TILE_PITCH;
+    const int row = (int)(i / GRID_COLS);
+    return GRID_Y0 + (row - mScrollRow) * TILE_PITCH;
+}
+
+void MainScreen::scrollToCursor(size_t count)
+{
+    const int totalRows = count == 0 ? 0 : (int)((count - 1) / GRID_COLS) + 1;
+    const int maxScroll = std::max(0, totalRows - GRID_FULL_ROWS);
+    const int row       = count == 0 ? 0 : (int)(mCursor / GRID_COLS);
+    if (row < mScrollRow) {
+        mScrollRow = row;
+    }
+    else if (row > mScrollRow + GRID_FULL_ROWS - 1) {
+        mScrollRow = row - (GRID_FULL_ROWS - 1);
+    }
+    mScrollRow = std::clamp(mScrollRow, 0, maxScroll);
+}
+
+void MainScreen::updateGridCursor(const InputState& input, size_t count)
+{
+    if (count == 0) {
+        mCursor    = 0;
+        mScrollRow = 0;
+        return;
+    }
+    if (mCursor >= count) {
+        mCursor = count - 1;
+    }
+
+    const u64 now = armGetSystemTick();
+    // A fresh press moves immediately; a held direction repeats every
+    // GRID_REPEAT_TICKS (which also serves as the initial delay).
+    auto pressed = [&](u64 mask) { return (input.kDown & mask) || ((input.kHeld & mask) && now > mLastMoveTick + GRID_REPEAT_TICKS); };
+
+    const size_t lastRow = (count - 1) / GRID_COLS;
+    const size_t row     = mCursor / GRID_COLS;
+    bool moved           = false;
+
+    if (pressed(HidNpadButton_AnyUp)) {
+        if (row > 0) {
+            mCursor -= GRID_COLS;
+            moved = true;
+        }
+    }
+    else if (pressed(HidNpadButton_AnyDown)) {
+        if (row < lastRow) {
+            mCursor = std::min(mCursor + GRID_COLS, count - 1);
+            moved   = true;
+        }
+    }
+    else if (pressed(HidNpadButton_AnyLeft)) {
+        // Left at column 0 is the sidebar-entry gesture, handled by the
+        // caller before this runs.
+        if (mCursor % GRID_COLS != 0) {
+            mCursor--;
+            moved = true;
+        }
+    }
+    else if (pressed(HidNpadButton_AnyRight)) {
+        // Row-major continuation: right on the last column flows to the next
+        // row's first tile.
+        if (mCursor + 1 < count) {
+            mCursor++;
+            moved = true;
+        }
+    }
+
+    if (moved) {
+        mLastMoveTick = now;
+    }
+    scrollToCursor(count);
 }
 
 void MainScreen::setSaveTypeFilter(saveTypeFilter_t filter)
@@ -249,9 +331,7 @@ void MainScreen::setSaveTypeFilter(saveTypeFilter_t filter)
 
 void MainScreen::draw() const
 {
-    const size_t entries     = hid.maxVisibleEntries();
     const size_t filteredCnt = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter);
-    const size_t max         = filteredCnt > 0 ? hid.maxEntries(filteredCnt) + 1 : 0;
     auto selEnt              = MS::selectedEntries();
 
     Gfx::ClearScreen(COLOR_BG);
@@ -260,7 +340,7 @@ void MainScreen::draw() const
     // its detail feeds the right panel.
     std::string gameName;
     if (filteredCnt > 0) {
-        backupList->refreshSelected(g_currentUId, mSaveTypeFilter, hid.fullIndex(), TitleCatalog::get().generation());
+        backupList->refreshSelected(g_currentUId, mSaveTypeFilter, mCursor, TitleCatalog::get().generation());
         gameName = backupList->title().displayName();
     }
 
@@ -324,7 +404,11 @@ void MainScreen::draw() const
     }
 
     // ---- Title grid ----
-    for (size_t k = hid.page() * entries; k < hid.page() * entries + max; k++) {
+    // Rows mScrollRow..mScrollRow+3: three fully visible plus the faded
+    // partial row peeking past the viewport bottom.
+    const size_t drawBegin = (size_t)mScrollRow * GRID_COLS;
+    const size_t drawEnd   = std::min(filteredCnt, drawBegin + (size_t)(GRID_COLS * GRID_DRAW_ROWS));
+    for (size_t k = drawBegin; k < drawEnd; k++) {
         const int tx = selectorX(k), ty = selectorY(k);
         Shapes::cardRound(tx, ty, TILE, TILE, 14, COLOR_TILE, COLOR_STROKE2, 1);
         Texture* smallIcon = TitleCatalog::get().filteredSmallIcon(g_currentUId, mSaveTypeFilter, k);
@@ -347,7 +431,14 @@ void MainScreen::draw() const
 
     // Focus ring on the selected tile (hidden while the rail owns the cursor).
     if (filteredCnt > 0 && !sidebarFocused) {
-        Shapes::focusRing(selectorX(hid.index()), selectorY(hid.index()), TILE, TILE, 14, COLOR_ACCENT);
+        Shapes::focusRing(selectorX(mCursor), selectorY(mCursor), TILE, TILE, 14, COLOR_ACCENT);
+    }
+
+    // Fade the partial fourth row into the background (only when it holds
+    // tiles); the opaque hint bar hides the few pixels that spill past 674.
+    if (drawEnd > drawBegin + (size_t)(GRID_COLS * GRID_FULL_ROWS)) {
+        const Color fadeTop = makeColor(COLOR_BG.r, COLOR_BG.g, COLOR_BG.b, 0);
+        Gfx::DrawRectGradientV(GRID_AREA_X + 1, GRID_FADE_Y, GRID_AREA_W - 1, GRID_FADE_H, fadeTop, COLOR_BG);
     }
 
     // ---- Right panel ----
@@ -637,9 +728,10 @@ void MainScreen::updateSelector(const InputState& input)
     if (gen != mLastGeneration) {
         mLastGeneration    = gen;
         const size_t count = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter);
-        if (hid.fullIndex() >= count) {
-            this->index(TITLES, count > 0 ? count - 1 : 0);
+        if (mCursor >= count) {
+            mCursor = count > 0 ? count - 1 : 0;
         }
+        scrollToCursor(count); // fewer rows may remain than the window showed
         MS::clearSelectedEntries();
     }
 
@@ -653,31 +745,32 @@ void MainScreen::updateSelector(const InputState& input)
             // don't update title grid while sidebar is focused
         }
         else if (sidebarExitFrame) {
-            // skip hid.update() until Right/B is released so held key doesn't move the title cursor
+            // skip grid-cursor updates until Right/B is released so the held key doesn't move the title cursor
             if (!(input.kHeld & (HidNpadButton_AnyRight | HidNpadButton_B))) {
                 sidebarExitFrame = false;
             }
         }
-        else if ((input.kDown & HidNpadButton_Left) && hid.index() % GRID_COLS == 0) {
+        else if ((input.kDown & HidNpadButton_Left) && mCursor % GRID_COLS == 0) {
             sidebarFocused = true;
             sidebarCursor  = static_cast<int>(mSaveTypeFilter);
         }
         else {
-            hid.update(count);
+            updateGridCursor(input, count);
         }
 
-        // loop through every rendered title
-        for (u8 row = 0; row < GRID_ROWS; row++) {
-            for (u8 col = 0; col < GRID_COLS; col++) {
-                u8 index = row * GRID_COLS + col;
-                if (index > hid.maxEntries(count))
+        // Touch selection over the visible tiles (including the faded partial
+        // row — tapping it selects the tile and scrolls it into full view).
+        if (input.touch.count > 0) {
+            const size_t visBegin = (size_t)mScrollRow * GRID_COLS;
+            const size_t visEnd   = std::min(count, visBegin + (size_t)(GRID_COLS * GRID_DRAW_ROWS));
+            for (size_t k = visBegin; k < visEnd; k++) {
+                const int x = selectorX(k);
+                const int y = selectorY(k);
+                if (input.touch.touches[0].x >= x && input.touch.touches[0].x <= x + TILE && input.touch.touches[0].y >= y &&
+                    input.touch.touches[0].y <= y + TILE && input.touch.touches[0].y < GRID_BOTTOM) {
+                    mCursor = k;
+                    scrollToCursor(count);
                     break;
-
-                u32 x = selectorX(index);
-                u32 y = selectorY(index);
-                if (input.touch.count > 0 && input.touch.touches[0].x >= x && input.touch.touches[0].x <= x + TILE && input.touch.touches[0].y >= y &&
-                    input.touch.touches[0].y <= y + TILE) {
-                    hid.index(index);
                 }
             }
         }
@@ -1048,7 +1141,8 @@ void MainScreen::entryType(entryType_t type_)
 void MainScreen::resetIndex(entryType_t type)
 {
     if (type == TITLES) {
-        hid.reset();
+        mCursor    = 0;
+        mScrollRow = 0;
     }
     else {
         backupList->resetIndex();
@@ -1057,14 +1151,14 @@ void MainScreen::resetIndex(entryType_t type)
 
 size_t MainScreen::index(entryType_t type) const
 {
-    return type == TITLES ? hid.fullIndex() : backupList->index();
+    return type == TITLES ? mCursor : backupList->index();
 }
 
 void MainScreen::index(entryType_t type, size_t i)
 {
     if (type == TITLES) {
-        hid.page(i / hid.maxVisibleEntries());
-        hid.index(i - hid.page() * hid.maxVisibleEntries());
+        mCursor = i;
+        scrollToCursor(TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter));
     }
     else {
         backupList->setIndex(i);
