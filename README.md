@@ -2,8 +2,8 @@
 
 A fast and simple homebrew save manager for 3DS and Switch written in C++.
 
-<p align="center"><img src="https://i.imgur.com/adEdJWO.jpeg" />
-<img src="https://i.imgur.com/7Z2S0gG.png" /></p>
+<p align="center"><img src="https://i.imgur.com/EaY1vRB.jpeg" />
+<img src="https://i.imgur.com/OrZ624x.jpeg" /></p>
 
 ## Why use Checkpoint?
 
@@ -11,19 +11,47 @@ Checkpoint is created following ideas of simplicity and efficiency. The UI has b
 
 Moreover, Checkpoint is extremely lightweight - while being packaged with a nice graphic user interface - and is built using the most recent libraries available.
 
-Checkpoint for 3DS natively supports 3DS and DS cartridges, digital standard titles and demo titles. It also automatically checks and filters homebrew titles which may not have a save archive to backup or restore, which is done without an external title list and filters. For this reason, Checkpoint doesn't need constant user maintenance to retain full functionality.
+Checkpoint doesn't rely on external title lists or filters to work: titles are detected and filtered automatically, so it doesn't need constant user maintenance to retain full functionality.
 
-Checkpoint for Switch natively supports NAND saves for the titles you have played. Title information are loaded automatically.
+## Features
+
+Checkpoint backs up and restores save data for:
+
+* **3DS**: 3DS **cartridges and digital titles** (including demos), extdata, **DS** cartridges, **DSiWare** and **GBA Virtual Console** titles
+* **Switch**: saves for the titles you have played, with title information loaded automatically
+
+Both versions share the same core feature set:
+
+* A completely redesigned user interface, with **light and dark mode** theming
+* A **Settings section** to configure everything directly from the console: favorites, filters, additional save folders and more, with no manual file editing required
+* Internationalization support: English, Italian, French, German, Portuguese, Spanish, Dutch, Japanese and Chinese
+* Fast, responsive file operations: backups and restores run on a worker thread, and backups can be cancelled while in progress
+* Additional save folders, configurable per title through a built-in folder browser
+* A **background FTP server**, to access your save backups directly from your PC
+* **Wireless save transfer** between consoles
+* An **HTTP log server**, to view Checkpoint's logs in real time from any browser on your network
+
+On Switch, Checkpoint also provides:
+
+* A rendering backend built on **deko3d**, which makes the application ~70% smaller than before
+* **1080p docked mode** support, alongside 720p in handheld
+* File-by-file verification after restore, and safer handling of large save restores
+
+## chlink
+
+Checkpoint comes with **chlink**, a companion command line app for your PC that talks to Checkpoint's wireless save transfer feature. With chlink you can send save backups from your PC to the console and receive backups from the console to your PC, over your local network - no cables and no SD card swapping required.
+
+Transfers are protected by a 4-digit PIN displayed on the console, and chlink automatically recognizes backups coming from a Checkpoint SD card layout, so title and backup information are filled in for you.
+
+chlink is a single, dependency-free executable available for Windows, macOS and Linux. You can download it from the [releases page](https://github.com/BernardoGiordano/Checkpoint/releases/latest), or build it yourself from the `tools/chlink` folder.
 
 ## Usage
 
-You can use Checkpoint for 3DS with both cfw and Rosalina-based Homebrew Launchers. *hax-based Homebrew Launchers are not supported by Checkpoint. 
+You can use Checkpoint for 3DS with both cfw and Rosalina-based Homebrew Launchers. *hax-based Homebrew Launchers are not supported by Checkpoint.
 
 Checkpoint for Switch runs on homebrew launcher. Make sure you're running up-to-date payloads.
 
-The first launch of the 3DS version will take considerably longer than usual (usually 1-2 minutes depending on how many titles you have installed), due to the working directories being created - Checkpoint will be significatively faster upon launch from then on.
-
-You can scroll between the title list with the DPAD/LR and target a title with A when the selector is on it. Now, you can use the DPAD or the touchscreen to select a target backup to restore/overwrite.
+The first launch will take longer than usual, due to the working directories being created - Checkpoint will be significantly faster upon launch from then on.
 
 ## Working path
 
@@ -32,7 +60,7 @@ Checkpoint relies on the following folders to store the files it generates. Note
 ### 3DS
 
 * **`sdmc:/3ds/Checkpoint`**: root path
-* **`sdmc:/3ds/Checkpoint/config.json`**: custom configuration file
+* **`sdmc:/3ds/Checkpoint/config.json`**: configuration file
 * **`sdmc:/3ds/Checkpoint/logs`**: log files
 * **`sdmc:/3ds/Checkpoint/saves/<unique id> <game title>`**: root path for all the save backups for a generic game
 * **`sdmc:/3ds/Checkpoint/extdata/<unique id> <game title>`**: root path for all the extdata backups for a generic game
@@ -40,45 +68,13 @@ Checkpoint relies on the following folders to store the files it generates. Note
 ### Switch
 
 * **`sdmc:/switch/Checkpoint`**: root path
+* **`sdmc:/switch/Checkpoint/config.json`**: configuration file
 * **`sdmc:/switch/Checkpoint/logs`**: log files
-* **`sdmc:/switch/Checkpoint/config.json`**: custom configuration file
 * **`sdmc:/switch/Checkpoint/saves/<title id> <game title>`**: root path for all the save backups for a generic game
 
-## Configuration file
+## Configuration
 
-You can add and toggle features to Checkpoint for 3DS by editing the **`config.json`** configuration file.
-
-### Sample configuration file:
-
-```
-{
-  "filter": [
-    "0x000400000011C400",
-    "0x000400000014F100"
-  ],
-  "favorites": [
-    "0x000400000011C400"
-  ],
-  "additional_save_folders": {
-    "0x00040000001B5000": {
-      "folders": [
-        "/3ds/mySaves/1B50",
-        "/moreSaves"
-      ]
-    },
-    "0x00040000001B5100": {
-      "folders": [
-        "/3ds/PKSM/backups"
-      ]
-    }
-  },
-  "additional_extdata_folders": {
-
-  },
-  "nand_saves": true,
-  "version": 3
-}
-```
+All the options that used to require manual edits to the configuration file can now be managed from the Settings section, directly on the console. The `config.json` file is still stored in Checkpoint's working directory, but you're not required to touch it anymore.
 
 ## Troubleshooting
 
@@ -92,11 +88,13 @@ devkitARM and devkitA64 are required to compile Checkpoint for 3DS and Switch, r
 
 ### 3DS version
 
-`dkp-pacman -S libctru citro3d citro2d tex3ds 3ds-bzip2`
+`dkp-pacman -S libctru citro3d citro2d tex3ds`
 
 ### Switch version
 
-`dkp-pacman -S libnx switch-pkg-config switch-freetype switch-libpng switch-libjpeg-turbo switch-sdl2 switch-sdl2_image switch-sdl2_ttf`
+`dkp-pacman -S libnx switch-pkg-config deko3d switch-freetype switch-libjpeg-turbo`
+
+Build from the repository root with `make 3ds` or `make switch`.
 
 ## License
 
@@ -107,6 +105,9 @@ This project is licensed under the GNU GPLv3. Additional Terms 7.b and 7.c of GP
 * [Bernardo](https://github.com/BernardoGiordano/) for creating Checkpoint.
 * [J-D-K](https://github.com/J-D-K) for the original [JKSM](https://github.com/J-D-K/JKSM) version.
 * [TuxSH](https://github.com/tuxsh) for [TWLSaveTool](https://github.com/TuxSH/TWLSaveTool), from which SPI code has been taken.
+* [LiquidFenrir](https://github.com/LiquidFenrir) for the GBA Virtual Console save support.
+* [SNBeast](https://github.com/SNBeast) for the DSiWare save support proof of concept.
+* [edu1010](https://github.com/edu1010) for the wireless save transfer feature.
 * [piepie62](https://github.com/piepie62) and all other [PKSM](https://github.com/FlagBrew/PKSM) contributors for some code that has been ported to Checkpoint.
 * WinterMute, fincs and [devkitPro](https://devkitpro.org/) contributors for devkitARM, devkitA64 and [dkp-pacman](https://github.com/devkitPro/pacman/releases).
 * Yellows8 and all the mantainers for [switch-examples](https://github.com/switchbrew/switch-examples).
