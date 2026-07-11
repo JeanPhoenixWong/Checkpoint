@@ -31,6 +31,7 @@
 #include "savekind.hpp"
 #include "title.hpp"
 #include <array>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -67,8 +68,10 @@ public:
 
     // Resolve a title by its id or display name, copying the first match into
     // `dst`. Used by the wireless receiver to map an incoming backup to a title's
-    // backup folder; returns false when no title matches. Main-thread only, like
-    // every other catalog query.
+    // backup folder; returns false when no title matches. Unlike every other
+    // catalog query these run on the HTTP server thread, so they take mMutex to
+    // serialize against the main thread's loadTitles/sortTitles/refreshDirectories
+    // writers (see the threading note on mMutex).
     bool getTitleById(Title& dst, u64 id);
     bool getTitleByName(Title& dst, const std::string& name);
 
@@ -131,6 +134,15 @@ private:
     void rebuildFilterIndex(AccountUid uid);
 
     static constexpr size_t FILTER_COUNT = 4; // one row per SaveKind::all() entry
+
+    // Almost every query and mutation runs on the main thread and needs no
+    // locking. The one exception is the wireless receiver, which resolves an
+    // incoming backup's title from the HTTP server thread via getTitleById/
+    // getTitleByName. This mutex serializes those two reads against the
+    // main-thread writers that restructure mTitles (loadTitles, sortTitles,
+    // refreshDirectories) so a lookup can't copy a Title out of a vector that a
+    // reload/sort is reallocating. Recursive because loadTitles calls sortTitles.
+    mutable std::recursive_mutex mMutex;
 
     std::unordered_map<AccountUid, std::vector<Title>> mTitles;
     std::unordered_map<AccountUid, std::array<std::vector<size_t>, FILTER_COUNT>> mFilterIndex;

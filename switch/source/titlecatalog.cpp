@@ -39,6 +39,7 @@ TitleCatalog::TitleCatalog(void) : mSortMode(Configuration::getInstance().sortMo
 
 void TitleCatalog::loadTitles(void)
 {
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
     mTitles.clear();
 
     NsApplicationControlData* nsacd = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
@@ -180,6 +181,7 @@ namespace {
 
 void TitleCatalog::sortTitles(void)
 {
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
     for (auto& vect : mTitles) {
         std::sort(vect.second.begin(), vect.second.end(), [this](Title& l, Title& r) {
             switch (mSortMode) {
@@ -246,6 +248,7 @@ bool TitleCatalog::favorite(AccountUid uid, int i)
 
 void TitleCatalog::refreshDirectories(u64 id)
 {
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
     for (auto& pair : mTitles) {
         for (size_t i = 0; i < pair.second.size(); i++) {
             if (pair.second.at(i).id() == id) {
@@ -258,6 +261,7 @@ void TitleCatalog::refreshDirectories(u64 id)
 
 bool TitleCatalog::getTitleById(Title& dst, u64 id)
 {
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
     for (auto& pair : mTitles) {
         for (auto& title : pair.second) {
             if (title.id() == id) {
@@ -271,6 +275,7 @@ bool TitleCatalog::getTitleById(Title& dst, u64 id)
 
 bool TitleCatalog::getTitleByName(Title& dst, const std::string& name)
 {
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
     for (auto& pair : mTitles) {
         for (auto& title : pair.second) {
             if (title.displayName() == name || title.name() == name) {
