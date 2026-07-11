@@ -74,6 +74,23 @@ public:
     // snapshotted to know when its size labels went stale.
     u32 generation(void) const { return mGeneration.load(); }
 
+    // Suspend/resume the walk. The walk floods the FS service with small SD
+    // requests, which delays latency-sensitive FS users in *other* processes —
+    // observed as the swkbd applet taking the whole remaining walk (10s+) to
+    // appear. Thread priority can't fix that (the contention is inside the FS
+    // sysmodule, not on our cores), so callers about to launch an applet pause
+    // the walk; it blocks between entries until resumed. Calls nest.
+    void pause(void);
+    void resume(void);
+
+    // RAII pause for the duration of a scope (e.g. a swkbd session).
+    struct PauseGuard {
+        PauseGuard(void) { BackupSizeCache::get().pause(); }
+        ~PauseGuard(void) { BackupSizeCache::get().resume(); }
+        PauseGuard(const PauseGuard&)            = delete;
+        PauseGuard& operator=(const PauseGuard&) = delete;
+    };
+
     // Stop the worker and join it. Called at application shutdown; any in-flight
     // walk returns promptly (checked between top-level backup folders).
     void shutdown(void);
@@ -92,6 +109,11 @@ private:
     void ensureWorker(void);
     void workerLoop(void);
     void compute(u64 id, const std::string& rootPath);
+    // Recursive subtree size like io::directorySize, but calls gate() between
+    // entries so pause() takes effect mid-walk and mStop aborts promptly.
+    u64 walkSize(const std::string& path);
+    // Blocks while paused; returns immediately when running or stopping.
+    void gate(void);
 
     std::mutex mMutex;
     std::condition_variable mCond;
@@ -101,6 +123,7 @@ private:
     std::set<u64> mPending; // ids with a compute queued or in flight
     std::set<u64> mDirty;   // ids invalidated while a compute was in flight
     std::atomic<bool> mStop{false};
+    std::atomic<int> mPauseCount{0};
     std::atomic<u32> mGeneration{1};
 };
 

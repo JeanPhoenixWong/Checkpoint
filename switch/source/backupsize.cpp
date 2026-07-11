@@ -27,6 +27,7 @@
 #include "backupsize.hpp"
 #include "directory.hpp"
 #include "io.hpp"
+#include "logging.hpp"
 #include <sys/stat.h>
 
 void BackupSizeCache::ensureWorker(void)
@@ -85,6 +86,26 @@ void BackupSizeCache::invalidate(u64 id)
     mGeneration.fetch_add(1);
 }
 
+void BackupSizeCache::pause(void)
+{
+    mPauseCount.fetch_add(1);
+}
+
+void BackupSizeCache::resume(void)
+{
+    mPauseCount.fetch_sub(1);
+    mCond.notify_all();
+}
+
+void BackupSizeCache::gate(void)
+{
+    if (mPauseCount.load() <= 0 || mStop.load()) {
+        return;
+    }
+    std::unique_lock<std::mutex> lock(mMutex);
+    mCond.wait(lock, [this]() { return mPauseCount.load() <= 0 || mStop.load(); });
+}
+
 void BackupSizeCache::shutdown(void)
 {
     {
@@ -102,6 +123,17 @@ void BackupSizeCache::shutdown(void)
 
 void BackupSizeCache::workerLoop(void)
 {
+    // std::thread inherits the creator's priority (0x2C, same as the main thread)
+    // and default core. Horizon does not time-slice same-priority threads on the
+    // same core, so a long directory walk starves the UI until it blocks on fs
+    // IPC. Drop below the main thread so the UI always preempts the walk.
+    // Applications may only use priorities 0x2C-0x3B; anything else fails with
+    // kernel InvalidPriority (0xE001), so take the lowest allowed one.
+    const Result prioRc = svcSetThreadPriority(CUR_THREAD_HANDLE, 0x3B);
+    if (R_FAILED(prioRc)) {
+        Logging::warning("[sizecache] svcSetThreadPriority failed: 0x{:08X}", prioRc);
+    }
+
     for (;;) {
         std::pair<u64, std::string> task;
         {
@@ -123,8 +155,9 @@ void BackupSizeCache::workerLoop(void)
 void BackupSizeCache::compute(u64 id, const std::string& rootPath)
 {
     // Enumerate the immediate backup folders, summing each subtree (and keeping
-    // the per-backup totals). io::directorySize does the recursive walk; the
-    // mStop check between folders lets a shutdown abort a long scan promptly.
+    // the per-backup totals). walkSize does the recursive walk, honoring the
+    // pause gate; the mStop check between folders lets a shutdown abort a long
+    // scan promptly.
     Entry entry;
     std::string base = rootPath;
     if (!base.empty() && base.back() != '/') {
@@ -134,9 +167,10 @@ void BackupSizeCache::compute(u64 id, const std::string& rootPath)
     Directory items(base);
     if (items.good()) {
         for (size_t i = 0, sz = items.size(); i < sz && !mStop.load(); i++) {
+            gate();
             const std::string full = base + items.entry(i);
             if (items.folder(i)) {
-                const u64 s = io::directorySize(full + "/");
+                const u64 s = walkSize(full + "/");
                 entry.total += s;
                 entry.perBackup[full] = s;
             }
@@ -158,4 +192,31 @@ void BackupSizeCache::compute(u64 id, const std::string& rootPath)
     }
     mCache[id] = std::move(entry);
     mGeneration.fetch_add(1);
+}
+
+u64 BackupSizeCache::walkSize(const std::string& path)
+{
+    u64 total = 0;
+    Directory items(path);
+    if (!items.good()) {
+        return 0;
+    }
+    std::string base = path;
+    if (!base.empty() && base.back() != '/') {
+        base += "/";
+    }
+    for (size_t i = 0, sz = items.size(); i < sz && !mStop.load(); i++) {
+        gate();
+        const std::string child = base + items.entry(i);
+        if (items.folder(i)) {
+            total += walkSize(child + "/");
+        }
+        else {
+            struct stat st;
+            if (stat(child.c_str(), &st) == 0) {
+                total += (u64)st.st_size;
+            }
+        }
+    }
+    return total;
 }

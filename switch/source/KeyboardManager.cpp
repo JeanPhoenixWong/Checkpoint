@@ -25,6 +25,7 @@
  */
 
 #include "KeyboardManager.hpp"
+#include "backupsize.hpp"
 
 KeyboardManager::KeyboardManager(void)
 {
@@ -42,6 +43,10 @@ KeyboardManager::KeyboardManager(void)
 std::pair<bool, std::string> KeyboardManager::keyboard(const std::string& suggestion)
 {
     if (systemKeyboardAvailable) {
+        // The size-cache walk floods the FS service and delays the swkbd applet
+        // launch by the walk's full remaining duration; hold it while the
+        // keyboard session runs.
+        BackupSizeCache::PauseGuard pauseWalk;
         SwkbdConfig kbd;
         if (R_SUCCEEDED(swkbdCreate(&kbd, 0))) {
             swkbdConfigMakePresetDefault(&kbd);
