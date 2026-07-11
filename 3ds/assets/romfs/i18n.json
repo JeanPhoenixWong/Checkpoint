@@ -27,7 +27,7 @@
     "de": "Modulscan, Systemspeicherstände, Wi-Fi-Übertragung und Wiederherstellungsbestätigung. Änderungen werden direkt in config.json auf der SD-Karte gespeichert.",
     "pt": "Verificação de cartucho, saves do sistema, transferência Wi-Fi e confirmação de restauração. As alterações são gravadas diretamente no config.json do seu cartão SD.",
     "nl": "Cartridgescan, systeemsaves, wifi-overdracht en herstelbevestiging. Wijzigingen worden direct naar config.json op je SD-kaart geschreven.",
-    "ja": "カートリッジのスキャン、システムセーブ、Wi-Fi転送、リストア確認。変更はSDカードのconfig.jsonに直接書き込まれます。"
+    "ja": "カートリッジのスキャン、システムセーブ、\nWi-Fi転送、リストア確認。変更は\nSDカードのconfig.json\nに直接書き込まれます。"
   },
   "settings.library.title": {
     "en": "Library",
@@ -67,7 +67,7 @@
     "de": "Zusätzliche Speicherstand- und Extdata-Ordner pro Titel auf der SD-Karte.",
     "pt": "Pastas extras de save e extdata por título no seu cartão SD.",
     "nl": "Extra save- en extdata-mappen per titel op je SD-kaart.",
-    "ja": "SDカード上のタイトルごとの追加セーブ・拡張データフォルダ。"
+    "ja": "SDカード上のタイトルごとの追加セーブ・\n拡張データフォルダ。"
   },
   "settings.network.title": {
     "en": "Network",
@@ -87,7 +87,7 @@
     "de": "FTP-Server, Wi-Fi-Übertragungsstatus und Netzwerkadressen dieser Konsole.",
     "pt": "Servidor FTP, status da transferência Wi-Fi e os endereços de rede deste console.",
     "nl": "FTP-server, wifi-overdrachtsstatus en de netwerkadressen van deze console.",
-    "ja": "FTPサーバー、Wi-Fi転送の状態、本機のネットワークアドレス。"
+    "ja": "FTPサーバー、Wi-Fi転送の状態、\n本機のネットワークアドレス。"
   },
   "settings.about.title": {
     "en": "About",

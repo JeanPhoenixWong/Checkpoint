@@ -82,6 +82,22 @@ void BackupList::draw(bool focused) const
     const size_t offset = mCursor.offset();
     const size_t index  = mCursor.index();
     const size_t last   = std::min(offset + mVisibleRows, mRows.size());
+
+    // Scrollbar: only when there is more than one viewport of rows. Drawn before the
+    // rows so the selected row's fill and outline sit on top of it.
+    if (mRows.size() > mVisibleRows) {
+        const int trackX = mx + mw - 3;
+        C2D_DrawRectSolid(trackX, my, 0.5f, 3, mh, COLOR_LINE);
+        const float frac = (float)mVisibleRows / (float)mRows.size();
+        int thumbH       = (int)(mh * frac);
+        if (thumbH < 12) {
+            thumbH = 12;
+        }
+        const float posFrac = (float)offset / (float)(mRows.size() - mVisibleRows);
+        const int thumbY    = my + (int)((mh - thumbH) * posFrac);
+        C2D_DrawRectSolid(trackX, thumbY, 0.5f, 3, thumbH, COLOR_ACCENT);
+    }
+
     for (size_t i = offset; i < last; i++) {
         const Row& r   = mRows[i];
         const int rowY = my + (int)(i - offset) * mRowH;
@@ -124,19 +140,5 @@ void BackupList::draw(bool focused) const
             const float metaW = text.width(r.meta, 0.4f);
             text.draw(r.meta, mx + mw - 10 - metaW, textY + 1, 0.4f, COLOR_FAINT);
         }
-    }
-
-    // Scrollbar: only when there is more than one viewport of rows.
-    if (mRows.size() > mVisibleRows) {
-        const int trackX = mx + mw - 3;
-        C2D_DrawRectSolid(trackX, my, 0.5f, 3, mh, COLOR_LINE);
-        const float frac = (float)mVisibleRows / (float)mRows.size();
-        int thumbH       = (int)(mh * frac);
-        if (thumbH < 12) {
-            thumbH = 12;
-        }
-        const float posFrac = (float)offset / (float)(mRows.size() - mVisibleRows);
-        const int thumbY    = my + (int)((mh - thumbH) * posFrac);
-        C2D_DrawRectSolid(trackX, thumbY, 0.5f, 3, thumbH, COLOR_ACCENT);
     }
 }
