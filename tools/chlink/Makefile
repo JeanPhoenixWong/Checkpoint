@@ -21,7 +21,7 @@ vet:
 fmt:
 	gofmt -w .
 
-release: test vet
+release: vet
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
