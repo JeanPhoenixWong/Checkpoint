@@ -260,6 +260,24 @@ namespace {
     };
     std::vector<PendingGlyphUpload> s_pendingGlyphs;
 
+    // Freshly created textures (icons, avatars, atlas pages, color texels)
+    // waiting for their pixel copy + descriptor publish. Batched into one
+    // submission (flushTexUploads) instead of a submit + waitIdle per texture
+    // — a cold start used to pay one full GPU round-trip per installed title.
+    struct PendingTexUpload {
+        CMemPool::Handle scratch;
+        dk::Image image; // by-value copy: safe to record from even if the owner dies first
+        dk::ImageDescriptor descriptor;
+        u32 descId;
+        u32 width, height;
+        u32 dataSize; // scratch bytes, for the budget accounting
+    };
+    std::vector<PendingTexUpload> s_pendingTexes;
+    u32 s_pendingTexBytes = 0;
+    // Scratch kept alive across deferred uploads is pool growth that never
+    // shrinks; past this budget the queue is flushed eagerly.
+    constexpr u32 TEX_UPLOAD_BUDGET = 2 * 1024 * 1024;
+
     // Same ~1.2x size bump the retired SDL backend applied: both drawing and
     // measurement resolve through it, so it is invisible to callers.
     constexpr int scaledFontPx(int size)
@@ -292,6 +310,58 @@ static void oneShotCommands(F&& record)
     cmdMem.destroy();
 }
 
+// Submit every queued texture upload (pixel copies + descriptor publishes) as
+// one command list. Inside a frame the copies ride ahead of the frame's own
+// list (the queue executes in order), so draws recorded this frame sample the
+// finished texture and the scratch retires through the graveyard with no CPU
+// sync. Outside a frame (startup scan, budget flushes before the first
+// present) there is no slice fence to lean on, so wait the queue idle and
+// free the scratch immediately — still one sync per batch, not per texture.
+static void flushTexUploads(void)
+{
+    if (s_pendingTexes.empty()) {
+        return;
+    }
+    dk::UniqueCmdBuf cmd    = dk::CmdBufMaker{s_device}.create();
+    CMemPool::Handle cmdMem = s_poolData->allocate(std::max<u32>(DK_MEMBLOCK_ALIGNMENT, (u32)s_pendingTexes.size() * 512));
+    cmd.addMemory(cmdMem.getMemBlock(), cmdMem.getOffset(), cmdMem.getSize());
+    for (const PendingTexUpload& up : s_pendingTexes) {
+        dk::ImageView view{up.image};
+        cmd.copyBufferToImage({up.scratch.getGpuAddr()}, view, {0, 0, 0, up.width, up.height, 1});
+        s_imageDescs->update(cmd, up.descId, up.descriptor);
+    }
+    // Copies and descriptor writes must land before anything samples them.
+    cmd.barrier(DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors);
+    s_queue.submitCommands(cmd.finishList());
+    if (s_slot < 0) {
+        s_queue.waitIdle();
+        for (PendingTexUpload& up : s_pendingTexes) {
+            up.scratch.destroy();
+        }
+        cmdMem.destroy();
+    }
+    else {
+        for (PendingTexUpload& up : s_pendingTexes) {
+            graveyardForNow().push_back({up.scratch, UINT32_MAX});
+        }
+        graveyardForNow().push_back({cmdMem, UINT32_MAX});
+    }
+    s_pendingTexes.clear();
+    s_pendingTexBytes = 0;
+}
+
+// Queue one texture's pixel copy + descriptor publish, flushing eagerly once
+// the pending scratch exceeds the budget.
+static void queueTexUpload(
+    CMemPool::Handle scratch, const dk::Image& image, const dk::ImageDescriptor& descriptor, u32 descId, u32 width, u32 height, u32 dataSize)
+{
+    s_pendingTexes.push_back({scratch, image, descriptor, descId, width, height, dataSize});
+    s_pendingTexBytes += dataSize;
+    if (s_pendingTexBytes >= TEX_UPLOAD_BUDGET) {
+        flushTexUploads();
+    }
+}
+
 // Grab a free image-descriptor slot; returns false (with a log) when the
 // table is exhausted.
 static bool allocDescId(u32& descId)
@@ -309,9 +379,9 @@ static bool allocDescId(u32& descId)
     return false;
 }
 
-// Upload a tightly-packed RGBA8 pixel buffer into a new GPU texture and
-// publish its image descriptor. Returns nullptr (with a log) when the
-// descriptor table is exhausted.
+// Create a GPU texture from a tightly-packed RGBA8 pixel buffer; the upload
+// and descriptor publish are queued (flushTexUploads), not synced per call.
+// Returns nullptr (with a log) when the descriptor table is exhausted.
 static Texture* createTexture(const u8* pixels, u32 width, u32 height)
 {
     u32 descId;
@@ -338,12 +408,7 @@ static Texture* createTexture(const u8* pixels, u32 width, u32 height)
     dk::ImageDescriptor descriptor;
     descriptor.initialize(view);
 
-    oneShotCommands([&](dk::CmdBuf& cmd) {
-        cmd.copyBufferToImage({scratch.getGpuAddr()}, view, {0, 0, 0, width, height, 1});
-        s_imageDescs->update(cmd, descId, descriptor);
-    });
-
-    scratch.destroy();
+    queueTexUpload(scratch, texture->image, descriptor, descId, width, height, dataSize);
     return texture;
 }
 
@@ -581,6 +646,11 @@ void Gfx::Exit(void)
         up.scratch.destroy();
     }
     s_pendingGlyphs.clear();
+    for (PendingTexUpload& up : s_pendingTexes) {
+        up.scratch.destroy();
+    }
+    s_pendingTexes.clear();
+    s_pendingTexBytes = 0;
     for (auto& graveyard : s_graveyard) {
         for (DeferredFree& d : graveyard) {
             d.mem.destroy();
@@ -867,6 +937,9 @@ void Gfx::Render(void)
         return;
     }
     flushBatch();
+    // Texture queue first: a new atlas page's zero-fill must precede the
+    // glyph copies targeting it.
+    flushTexUploads();
     flushGlyphUploads();
     DkCmdList list = s_cmdRing->end(s_cmdbuf);
     s_queue.submitCommands(list);
@@ -960,12 +1033,10 @@ static bool newAtlasPage(void)
     dk::ImageDescriptor descriptor;
     descriptor.initialize(view);
 
-    oneShotCommands([&](dk::CmdBuf& cmd) {
-        dk::ImageView copyView{page.image};
-        cmd.copyBufferToImage({scratch.getGpuAddr()}, copyView, {0, 0, 0, ATLAS_SIZE, ATLAS_SIZE, 1});
-        s_imageDescs->update(cmd, descId, descriptor);
-    });
-    scratch.destroy();
+    // Queued like any texture: the zero-fill precedes this page's glyph copies
+    // because Render flushes the texture queue before the glyph queue, and
+    // glyphs land on a page only after it was queued here. No mid-frame stall.
+    queueTexUpload(scratch, page.image, descriptor, descId, ATLAS_SIZE, ATLAS_SIZE, ATLAS_SIZE * ATLAS_SIZE);
 
     s_atlasPages.push_back(page);
     return true;
@@ -1309,6 +1380,17 @@ void Gfx::SetTextureOpaque(Texture* texture)
 void Gfx::DestroyTexture(Texture* texture)
 {
     if (texture) {
+        // If the upload is still queued nothing ever sampled the texture:
+        // drop the queue entry (its scratch was never submitted, so it can
+        // die right now) instead of copying into memory headed for the grave.
+        for (auto it = s_pendingTexes.begin(); it != s_pendingTexes.end(); ++it) {
+            if (it->descId == texture->descId) {
+                s_pendingTexBytes -= it->dataSize;
+                it->scratch.destroy();
+                s_pendingTexes.erase(it);
+                break;
+            }
+        }
         // In-flight frames — and quads batched this frame but not yet
         // submitted — may still sample this texture, so memory and the
         // descriptor slot go to the graveyard until the slice fence proves
