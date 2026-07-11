@@ -109,6 +109,9 @@ Result io::copyFile(
     u32 offset = 0;
     u32 chunk  = size; // shrinks toward the readable-data boundary on RES_FS_PAST_DATA
     do {
+        if (sink.cancelled()) {
+            break;
+        }
         u32 rd = input.read(buffer, chunk);
         if (R_FAILED(input.result())) {
             // Sparse extdata: this offset+chunk runs past the file's real data. Halve
@@ -180,6 +183,9 @@ Result io::copyPxiSaveFile(FSPXI_Archive pxiArch, FS_Archive regularArch, const 
     u32 offset = 0;
     auto buf   = std::make_unique<u8[]>(size);
     do {
+        if (sink.cancelled()) {
+            break;
+        }
         u32 rd = input.read(buf.get(), size);
         if (R_FAILED(input.result())) {
             res = input.result();
@@ -219,6 +225,9 @@ Result io::copyTree(FS_Archive srcArch, FS_Archive dstArch, const std::u16string
     Result res = 0;
 
     for (const auto& entry : entries) {
+        if (sink.cancelled()) {
+            break;
+        }
         std::u16string dst = dstRoot + entry.rel;
         if (entry.folder) {
             res = io::createDirectory(dstArch, dst);
@@ -327,6 +336,11 @@ io::IoOutcome io::backup(const BackupTarget& target, const std::u16string& dstPa
             sink.begin("Backup", 1);
             res = io::copyPxiSaveFile(handle.pxi(), Archive::sdmc(), savePath, true, sink);
             sink.end();
+            if (sink.cancelled()) {
+                FSUSER_DeleteDirectoryRecursively(Archive::sdmc(), fsMakePath(PATH_UTF16, dstPath.data()));
+                Logging::info("Backup of {} cancelled by user.", title.shortDescription().c_str());
+                return {false, 0, BackupStage::Copy, true};
+            }
             if (R_FAILED(res)) {
                 FSUSER_DeleteDirectoryRecursively(Archive::sdmc(), fsMakePath(PATH_UTF16, dstPath.data()));
                 Logging::error("Failed to backup GBA save. Result {}.", res);
@@ -359,6 +373,11 @@ io::IoOutcome io::backup(const BackupTarget& target, const std::u16string& dstPa
             sink.begin("Backup", fileCount);
             res = io::copyTree(handle.fs(), Archive::sdmc(), archiveRoot, copyPath, entries, sink);
             sink.end();
+            if (sink.cancelled()) {
+                FSUSER_DeleteDirectoryRecursively(Archive::sdmc(), fsMakePath(PATH_UTF16, dstPath.data()));
+                Logging::info("Backup of {} cancelled by user.", title.shortDescription().c_str());
+                return {false, 0, BackupStage::Copy, true};
+            }
             if (R_FAILED(res)) {
                 FSUSER_DeleteDirectoryRecursively(Archive::sdmc(), fsMakePath(PATH_UTF16, dstPath.data()));
                 Logging::error("Failed to backup {}. Result {}.", target.dataTypeName(), res);
@@ -402,6 +421,13 @@ io::IoOutcome io::backup(const BackupTarget& target, const std::u16string& dstPa
         u8* saveFile      = new u8[saveSize];
         const u32 sectors = saveSize / sectorSize;
         for (u32 i = 0; i < sectors; ++i) {
+            if (sink.cancelled()) {
+                delete[] saveFile;
+                sink.end();
+                FSUSER_DeleteDirectoryRecursively(Archive::sdmc(), fsMakePath(PATH_UTF16, dstPath.data()));
+                Logging::info("Backup of {} cancelled by user.", title.shortDescription().c_str());
+                return {false, 0, BackupStage::Copy, true};
+            }
             res = SPIReadSaveData(cardType, sectorSize * i, saveFile + sectorSize * i, sectorSize);
             if (R_FAILED(res)) {
                 delete[] saveFile;

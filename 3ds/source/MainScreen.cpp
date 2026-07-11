@@ -441,6 +441,12 @@ void MainScreen::drawBottom(void) const
         char filePctStr[8];
         snprintf(filePctStr, sizeof(filePctStr), "%d%%", (int)((fileProgress > 1.0f ? 1.0f : fileProgress) * 100));
         drawProgressBar(barY, fileProgress, kbStr, filePctStr);
+
+        // Hold-B-to-cancel is offered for a backup only (see update()).
+        if (ts.mode == "Backup") {
+            std::string hint = TransferStatus::cancelRequested() ? i18n::t("transfer.cancelling") : i18n::t("transfer.cancel_hint");
+            text.drawCentered(hint, mx, mw, my + mh - 17, 0.4f, COLOR_FAINT);
+        }
     }
 }
 
@@ -451,10 +457,13 @@ void MainScreen::update(const InputState& input)
     // so the modal keeps updating even while a TransferJob is active.
     mTransfer = TransferStatus::snapshot();
 
-    // Hold-B-to-cancel for the network-transfer modal. Must run before the
-    // TransferJob early returns below: while a send is in flight update() bails
-    // out right after the result poll, so this is the only input the modal gets.
-    if (mTransfer.active && mTransfer.kind == TransferKind::Network) {
+    // Hold-B-to-cancel for the transfer modal. Must run before the TransferJob
+    // early returns below: while a transfer is in flight update() bails out right
+    // after the result poll, so this is the only input the modal gets. Cancel is
+    // offered for a network send and for a local backup (mode == "Backup"), never
+    // for a restore — a half-written restore must never be left on the cartridge.
+    const bool cancellable = mTransfer.active && (mTransfer.kind == TransferKind::Network || mTransfer.mode == "Backup");
+    if (cancellable) {
         if (hidKeysHeld() & KEY_B) {
             if (++mCancelHoldFrames >= 45 && !TransferStatus::cancelRequested()) {
                 TransferStatus::requestCancel();
@@ -475,7 +484,11 @@ void MainScreen::update(const InputState& input)
         // A backup/restore changed one or more folders; drop every cached total so
         // they get re-walked off-thread (a batch may have touched many titles).
         BackupSizeCache::get().invalidateAll();
-        if (result->ok) {
+        if (result->cancelled) {
+            // User-requested stop of a backup: neutral info, not an error.
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("transfer.cancelled"));
+        }
+        else if (result->ok) {
             currentOverlay = std::make_shared<InfoOverlay>(*this, result->successMsg);
         }
         else if (result->send) {

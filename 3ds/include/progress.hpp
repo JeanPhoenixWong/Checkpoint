@@ -48,19 +48,35 @@ struct ProgressSink {
     virtual void finishFile() = 0;
     // Ends the run (success or failure).
     virtual void end() = 0;
+    // Polled by the copy loops between files (and between chunks of one big
+    // file) to abort early. False by default: only a sink built for a backup
+    // item ever reports true, so a restore can never observe a cancel mid-copy.
+    virtual bool cancelled() const { return false; }
 };
 
 // Real adapter: mirrors progress into the global transfer state read by the
 // transfer modal. It only writes TransferStatus and never renders — the copy
 // runs on the TransferJob worker thread while the main loop draws the modal from
 // the snapshot, so the UI keeps animating throughout.
+//
+// Built with `cancellable` true only for a backup item, so cancelled() is
+// structurally always false for a restore and the shared copy loops never break
+// on it there — a cancel can never leave a half-written save on the cartridge.
+// The cancel request itself lives in the global TransferStatus flag ("hold B to
+// cancel"); this sink only decides whether the current run is allowed to read it.
 class UiProgressSink : public ProgressSink {
 public:
+    explicit UiProgressSink(bool cancellable = false) : mCancellable(cancellable) {}
+
     void begin(const std::string& mode, size_t totalFiles) override;
     void startFile(const std::u16string& name, u32 size) override;
     void advanceBytes(u32 offset) override;
     void finishFile() override;
     void end() override;
+    bool cancelled() const override;
+
+private:
+    bool mCancellable;
 };
 
 // Headless adapter: records the last figures reported, renders nothing. The

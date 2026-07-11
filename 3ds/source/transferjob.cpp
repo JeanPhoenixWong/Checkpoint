@@ -115,7 +115,6 @@ void TransferJob::runThread(void)
 
 void TransferJob::run(void)
 {
-    UiProgressSink sink;
     size_t done = 0;
 
     // Accumulate the batch outcome in locals; a later item's success must not
@@ -152,11 +151,15 @@ void TransferJob::run(void)
         else {
             TransferStatus::setSaveCount(done);
 
+            // Only a backup item's sink reads the global cancel flag, so a restore
+            // can never abort mid-copy and leave a half-written save on the cartridge.
+            UiProgressSink sink(item.op == Kind::Backup);
             BackupTarget target = item.title.backup(item.kind);
             io::IoOutcome out   = item.op == Kind::Restore ? io::restore(target, item.path, sink) : io::backup(target, item.path, sink);
 
             current = JobResult{.isRestore = item.op == Kind::Restore,
                 .ok                        = out.ok,
+                .cancelled                 = out.cancelled,
                 .res                       = out.res,
                 .stage                     = out.stage,
                 .successMsg                = item.successMsg,
@@ -174,6 +177,14 @@ void TransferJob::run(void)
         }
         lastResult = current;
         done++;
+
+        if (current.cancelled) {
+            // A cancel ends the whole batch, not just the save mid-copy: drop
+            // everything still queued so the modal closes on this result.
+            std::lock_guard<std::mutex> lock(mMutex);
+            mQueue.clear();
+            break;
+        }
     }
 
     {

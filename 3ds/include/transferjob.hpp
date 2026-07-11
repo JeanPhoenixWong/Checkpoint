@@ -54,6 +54,7 @@ public:
     struct JobResult {
         bool isRestore        = false;
         bool ok               = true;
+        bool cancelled        = false; // set when a backup was aborted via requestCancel()
         Result res            = 0;
         io::BackupStage stage = io::BackupStage::Copy;
         std::string successMsg; // shown on success (already resolved, e.g. the restored name)
