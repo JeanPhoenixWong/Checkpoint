@@ -28,6 +28,7 @@
 #include "MainScreen.hpp"
 #include "backupsize.hpp"
 #include "colors.hpp"
+#include "logging.hpp"
 #include "titlecatalog.hpp"
 #include "transfer.hpp"
 #include "transferjob.hpp"
@@ -39,9 +40,16 @@ static void networkLoop(void)
 {
     // Driven purely by the exit flag: appletMainLoop() belongs to the main
     // thread (calling it here can eat exit/focus applet events).
+    loop_status_t lastStatus = LOOP_CONTINUE;
     while (!g_shouldExitNetworkLoop) {
         if (g_ftpAvailable && Configuration::getInstance().isFTPEnabled()) {
-            ftp_loop();
+            loop_status_t status = ftp_loop();
+            if (status != LOOP_CONTINUE) {
+                if (status != lastStatus)
+                    Logging::warning("[ftp] ftp_loop returned {}", status == LOOP_RESTART ? "LOOP_RESTART" : "LOOP_EXIT");
+                svcSleepThread(100'000'000ULL); // don't spin on a persistent error
+            }
+            lastStatus = status;
         }
         else {
             // FTP off (the default): don't busy-spin a core for the app's
@@ -80,8 +88,12 @@ int main(void)
         g_currentUId = userIds.at(0);
 
     Thread networkThread;
-    threadCreate(&networkThread, (ThreadFunc)networkLoop, nullptr, nullptr, 16 * 1000, 0x2C, -2);
-    threadStart(&networkThread);
+    // Stack size must be page-aligned or threadCreate fails with LibnxError_BadInput.
+    Result netRc = threadCreate(&networkThread, (ThreadFunc)networkLoop, nullptr, nullptr, 16 * 1024, 0x2C, -2);
+    if (R_FAILED(netRc))
+        Logging::error("[net] threadCreate failed with result 0x{:08X}", netRc);
+    else if (R_FAILED(netRc = threadStart(&networkThread)))
+        Logging::error("[net] threadStart failed with result 0x{:08X}", netRc);
 
     while (appletMainLoop()) {
         padUpdate(&pad);

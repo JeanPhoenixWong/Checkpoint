@@ -43,10 +43,9 @@
 #define LISTEN_PORT     50000
 #define DATA_PORT       0 /* ephemeral port */
 
-/* Optional diagnostic hook, only wired on the 3DS build (ftpserver.cpp provides
- * the strong definition forwarding to Checkpoint's logger). Weak no-op default
- * so the core still links standalone; compiled out entirely elsewhere. */
-#ifdef __3DS__
+/* Optional diagnostic hook (the 3DS ftpserver.cpp and Switch util.cpp provide
+ * strong definitions forwarding to Checkpoint's logger). Weak no-op default
+ * so the core still links standalone. */
 __attribute__((weak)) void ftp_log(const char *msg) { (void)msg; }
 #define FTP_LOG(...)                                                                                                                                   \
   do                                                                                                                                                   \
@@ -55,12 +54,6 @@ __attribute__((weak)) void ftp_log(const char *msg) { (void)msg; }
     snprintf(_ftp_log_buf, sizeof(_ftp_log_buf), __VA_ARGS__);                                                                                         \
     ftp_log(_ftp_log_buf);                                                                                                                             \
   } while(0)
-#else
-#define FTP_LOG(...)                                                                                                                                   \
-  do                                                                                                                                                   \
-  {                                                                                                                                                    \
-  } while(0)
-#endif
 
 typedef struct ftp_session_t ftp_session_t;
 
@@ -1048,6 +1041,7 @@ static void ftp_session_new(int listen_fd) {
   new_fd = accept(listen_fd, (struct sockaddr*)&addr, &addrlen);
   if(new_fd < 0)
   {
+    FTP_LOG("FTP accept() failed errno=%d", errno);
     return;
   }
 
@@ -1055,6 +1049,7 @@ static void ftp_session_new(int listen_fd) {
   session = (ftp_session_t*)calloc(1, sizeof(ftp_session_t));
   if(session == NULL)
   {
+    FTP_LOG("FTP session calloc failed");
     ftp_closesocket(new_fd, true);
     return;
   }
@@ -1612,6 +1607,8 @@ int ftp_init(void) {
     return -1;
   }
 
+  FTP_LOG("FTP listening on %s:%u fd=%d", inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port), listenfd);
+
   return 0;
 }
 
@@ -1648,6 +1645,7 @@ loop_status_t ftp_loop(void) {
     if(errno == ENETDOWN)
       return LOOP_RESTART;
 
+    FTP_LOG("FTP listen poll() failed errno=%d", errno);
     return LOOP_EXIT;
   }
   else if(rc > 0)

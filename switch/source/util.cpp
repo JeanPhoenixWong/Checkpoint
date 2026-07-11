@@ -32,6 +32,16 @@
 #include "server.hpp"
 #include "titlecatalog.hpp"
 
+extern "C" {
+// Strong override of the weak diagnostic hook in ftp.c: routes the core's FTP_LOG
+// lines into Checkpoint's logger so they show up in the in-memory / file logs and
+// the /logs endpoints. C linkage to match the C core's declaration.
+void ftp_log(const char* msg)
+{
+    Logging::info("[ftp] {}", msg);
+}
+}
+
 void servicesExit(void)
 {
     // Stop and join the log server before socketExit tears the socket layer
