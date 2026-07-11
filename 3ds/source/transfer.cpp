@@ -32,6 +32,7 @@
 #include "json.hpp"
 #include "loader.hpp"
 #include "logging.hpp"
+#include "paths.hpp"
 #include "server.hpp"
 #include "transferprotocol.hpp"
 #include "transferstatus.hpp"
@@ -319,7 +320,7 @@ namespace {
             backupName = "Received_" + DateTime::dateTimeStr();
         }
 
-        std::u16string basePath = StringUtils::UTF8toUTF16(dataType == "extdata" ? "/3ds/Checkpoint/extdata/" : "/3ds/Checkpoint/saves/");
+        std::u16string basePath = Paths::rootFor(dataType == "extdata");
 
         std::u16string destRoot;
         bool foundTitle   = false;
@@ -347,12 +348,14 @@ namespace {
         }
 
         if (!foundTitle) {
-            std::string safeName = titleName.empty() ? "Unknown" : titleName;
-            std::string folder   = safeName;
-            if (!titleId.empty()) {
-                folder = titleId + " " + safeName;
-            }
-            destRoot = basePath + StringUtils::removeForbiddenCharacters(StringUtils::UTF8toUTF16(folder.c_str()));
+            // Name the folder exactly as TitleProbe would once this title is
+            // installed ("0x%05X " + sanitized name), so the received backup
+            // reconciles with the title's real folder instead of stranding in a
+            // titleId-named one. Fall back to a bare name only when we have no id.
+            std::string safeName         = titleName.empty() ? "Unknown" : titleName;
+            std::u16string sanitizedName = StringUtils::removeForbiddenCharacters(StringUtils::UTF8toUTF16(safeName.c_str()));
+            std::u16string folder        = (tid != 0) ? Paths::ctrFolderName(tid, sanitizedName) : sanitizedName;
+            destRoot                     = basePath + folder;
             if (!io::directoryExists(Archive::sdmc(), destRoot)) {
                 io::createDirectory(Archive::sdmc(), destRoot);
             }

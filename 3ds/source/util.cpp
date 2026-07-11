@@ -30,6 +30,7 @@
 #include "ftpserver.hpp"
 #include "i18n.hpp"
 #include "loader.hpp"
+#include "paths.hpp"
 #include "server.hpp"
 #include "thread.hpp"
 #include "title.hpp"
@@ -82,11 +83,14 @@ Result servicesInit(void)
     }
     ATEXIT(Archive::exit);
 
+    // Bootstrap the backup tree. Root owned by Paths so the layout is spelled
+    // once; mkdir wants an "sdmc:"-prefixed POSIX path.
+    const std::string ckpt = std::string("sdmc:") + Paths::checkpointRoot();
     mkdir("sdmc:/3ds", 777);
-    mkdir("sdmc:/3ds/Checkpoint", 777);
-    mkdir("sdmc:/3ds/Checkpoint/saves", 777);
-    mkdir("sdmc:/3ds/Checkpoint/extdata", 777);
-    mkdir("sdmc:/3ds/Checkpoint/logs", 777);
+    mkdir(ckpt.c_str(), 777);
+    mkdir((ckpt + "/saves").c_str(), 777);
+    mkdir((ckpt + "/extdata").c_str(), 777);
+    mkdir((ckpt + "/logs").c_str(), 777);
 
     Logging::initFileLogging();
 

@@ -25,6 +25,7 @@
  */
 
 #include "titleprobe.hpp"
+#include "paths.hpp"
 #include "titlequirks.hpp"
 #include <3ds.h>
 #include <cstdio>
@@ -50,9 +51,8 @@ namespace {
     bool probeCtr(u64 id, FS_MediaType media, u8* productCode, bool& accessibleSave, bool& gba, bool& accessibleExtdata,
         std::u16string& shortDescription, std::u16string& longDescription, std::u16string& savePath, std::u16string& extdataPath, IconStore& icons)
     {
-        const u32 low    = (u32)id;
-        const u32 high   = (u32)(id >> 32);
-        const u32 unique = low >> 8;
+        const u32 low  = (u32)id;
+        const u32 high = (u32)(id >> 32);
 
         smdh_s* smdh = (id == TID_PKSM) ? loadSMDH("romfs:/PKSM.smdh") : loadSMDH(low, high, media);
         if (smdh == NULL) {
@@ -60,13 +60,10 @@ namespace {
             return false;
         }
 
-        char uniqueStr[12] = {0};
-        sprintf(uniqueStr, "0x%05X ", (unsigned int)unique);
-
         shortDescription = StringUtils::removeForbiddenCharacters(boundedU16String(smdh->applicationTitles[1].shortDescription, 0x40));
         longDescription  = boundedU16String(smdh->applicationTitles[1].longDescription, 0x80);
-        savePath         = StringUtils::UTF8toUTF16("/3ds/Checkpoint/saves/") + StringUtils::UTF8toUTF16(uniqueStr) + shortDescription;
-        extdataPath      = StringUtils::UTF8toUTF16("/3ds/Checkpoint/extdata/") + StringUtils::UTF8toUTF16(uniqueStr) + shortDescription;
+        savePath         = Paths::ctrSavePath(id, shortDescription);
+        extdataPath      = Paths::ctrExtdataPath(id, shortDescription);
         AM_GetTitleProductCode(media, id, (char*)productCode);
 
         accessibleSave    = SaveDataSource::ctrSave(media, low, high).accessible();
