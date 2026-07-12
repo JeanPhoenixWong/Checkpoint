@@ -39,7 +39,32 @@ void CheckpointSetupFunc(Picoc* pc)
 // clang-format off
 struct LibraryFunction CheckpointFunctions[] =
 {
-    // Phase 0: no native bindings yet.
+    // titles: referenced by catalog index; ids cross the boundary as
+    // 16-hex-uppercase strings (picoc has no reliable 64-bit integers)
+    { ckpt_titles_count,       "int titles_count(void);" },
+    { ckpt_title_find,         "int title_find(char* idHex);" },
+    { ckpt_title_id,           "char* title_id(int idx);" },
+    { ckpt_title_name,         "char* title_name(int idx);" },
+    { ckpt_title_product_code, "char* title_product_code(int idx);" },
+    { ckpt_title_is_cart,      "int title_is_cart(int idx);" },
+    { ckpt_title_has_save,     "int title_has_save(int idx);" },
+    { ckpt_title_has_extdata,  "int title_has_extdata(int idx);" },
+    { ckpt_title_backup_path,  "char* title_backup_path(int idx, int kind);" },
+    // sd card (plus full picoc stdio: fopen("/3ds/...", ...) works)
+    { ckpt_read_directory,     "struct directory* read_directory(char* dir);" },
+    { ckpt_delete_directory,   "void delete_directory(struct directory* dir);" },
+    { ckpt_sd_mkdirs,          "int sd_mkdirs(char* path);" },
+    { ckpt_sd_exists,          "int sd_exists(char* path);" },
+    // gui (all block the script until the user answers)
+    { ckpt_gui_message,        "void gui_message(char* text);" },
+    { ckpt_gui_confirm,        "int gui_confirm(char* text);" },
+    { ckpt_gui_pick_one,       "int gui_pick_one(char* prompt, char** items, int count);" },
+    { ckpt_gui_pick_many,      "int gui_pick_many(char* prompt, char** items, int count, int* selected);" },
+    { ckpt_gui_keyboard,       "void gui_keyboard(char* out, char* hint, int maxChars);" },
+    { ckpt_gui_status,         "void gui_status(char* text);" },
+    // misc
+    { ckpt_script_log,         "void script_log(char* msg);" },
+    { ckpt_selected_title,     "char* selected_title(void);" },
     { NULL, NULL }
 };
 // clang-format on

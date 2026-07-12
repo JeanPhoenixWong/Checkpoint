@@ -33,7 +33,44 @@
 // Every binding has picoc's fixed signature; the prototypes scripts actually
 // see live in the table in library_checkpoint.c, and the implementations are
 // per-platform (3ds/source/script/checkpoint_api.cpp).
-//
-// Empty in phase 0: scripts get picoc's own stdlib and nothing else.
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define CKPT_BINDING(name) void name(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+
+/* titles (catalog index space = the Save list) */
+CKPT_BINDING(ckpt_titles_count);
+CKPT_BINDING(ckpt_title_find);
+CKPT_BINDING(ckpt_title_id);
+CKPT_BINDING(ckpt_title_name);
+CKPT_BINDING(ckpt_title_product_code);
+CKPT_BINDING(ckpt_title_is_cart);
+CKPT_BINDING(ckpt_title_has_save);
+CKPT_BINDING(ckpt_title_has_extdata);
+CKPT_BINDING(ckpt_title_backup_path);
+
+/* sd card */
+CKPT_BINDING(ckpt_read_directory);
+CKPT_BINDING(ckpt_delete_directory);
+CKPT_BINDING(ckpt_sd_mkdirs);
+CKPT_BINDING(ckpt_sd_exists);
+
+/* gui (block the script thread on the UI bridge) */
+CKPT_BINDING(ckpt_gui_message);
+CKPT_BINDING(ckpt_gui_confirm);
+CKPT_BINDING(ckpt_gui_pick_one);
+CKPT_BINDING(ckpt_gui_pick_many);
+CKPT_BINDING(ckpt_gui_keyboard);
+CKPT_BINDING(ckpt_gui_status);
+
+/* misc */
+CKPT_BINDING(ckpt_script_log);
+CKPT_BINDING(ckpt_selected_title);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
