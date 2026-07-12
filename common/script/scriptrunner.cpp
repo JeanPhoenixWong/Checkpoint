@@ -28,6 +28,10 @@
 #include "scriptengine.hpp"
 #include "thread.hpp"
 
+extern "C" {
+#include "checkpoint_api.h"
+}
+
 bool ScriptRunner::start(std::string scriptPath, std::string displayName, std::string titleIdHex)
 {
     if (mState.load() != State::Idle) {
@@ -55,6 +59,9 @@ void ScriptRunner::runThread(void)
 void ScriptRunner::run(void)
 {
     ScriptEngine::Outcome out = ScriptEngine::run(mPath, {mTitleIdHex});
+    // The run is over whatever the exit path was (return, exit(), parse-error
+    // longjmp): reclaim any archive handles the script left open.
+    ckpt_sav_close_all();
     {
         std::lock_guard<std::mutex> lock(mMutex);
         mOutcome = Outcome{mName, out.exitValue, std::move(out.output)};

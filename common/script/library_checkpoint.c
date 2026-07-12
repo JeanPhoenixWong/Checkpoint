@@ -50,6 +50,28 @@ struct LibraryFunction CheckpointFunctions[] =
     { ckpt_title_has_save,     "int title_has_save(int idx);" },
     { ckpt_title_has_extdata,  "int title_has_extdata(int idx);" },
     { ckpt_title_backup_path,  "char* title_backup_path(int idx, int kind);" },
+    // save archives (kind: 0=save, 1=extdata). sav_open returns a handle >= 0,
+    // -1 for an unsupported title/kind (GBA VC, DSiWare, SPI cart saves),
+    // -2 when all 8 handles are taken, or a negative FS Result. Paths are
+    // archive-absolute ("/file.bin"). sav_read/sav_write/sav_delete/sav_commit
+    // return 0 on success or a negative Result; sav_read's out buffer is
+    // malloc'd (NUL-terminated for convenience). sav_list returns full paths,
+    // folders with a trailing '/', NULL on error; free with delete_directory.
+    // sav_commit also clears the title's secure value (as restore does);
+    // it is a no-op on extdata.
+    { ckpt_sav_open,           "int sav_open(int titleIdx, int kind);" },
+    { ckpt_sav_read,           "int sav_read(int h, char* path, char** out, int* outSize);" },
+    { ckpt_sav_write,          "int sav_write(int h, char* path, char* data, int size);" },
+    { ckpt_sav_delete,         "int sav_delete(int h, char* path);" },
+    { ckpt_sav_list,           "struct directory* sav_list(int h, char* path);" },
+    { ckpt_sav_commit,         "int sav_commit(int h);" },
+    { ckpt_sav_close,          "void sav_close(int h);" },
+    // network. web_get returns the HTTP status code, or a negative value on
+    // failure (-1 = curl unavailable, -(CURLcode+100) = transfer error); the
+    // out buffer is malloc'd and NUL-terminated, out/outSize are NULL/0 on
+    // failure. net_ip returns "0.0.0.0" with no network.
+    { ckpt_net_ip,             "char* net_ip(void);" },
+    { ckpt_web_get,            "int web_get(char** out, int* outSize, char* url);" },
     // sd card (plus full picoc stdio: fopen("/3ds/...", ...) works)
     { ckpt_read_directory,     "struct directory* read_directory(char* dir);" },
     { ckpt_delete_directory,   "void delete_directory(struct directory* dir);" },

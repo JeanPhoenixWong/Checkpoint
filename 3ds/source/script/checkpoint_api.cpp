@@ -32,6 +32,9 @@
 // point, so it is only ever called before C++ objects holding resources exist.
 
 #include "backuptarget.hpp"
+#include "common.hpp"
+#include "directory.hpp"
+#include "fsstream.hpp"
 #include "loader.hpp"
 #include "logging.hpp"
 #include "paths.hpp"
@@ -40,6 +43,7 @@
 #include "util.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <curl/curl.h>
 #include <dirent.h>
 #include <string>
 #include <sys/stat.h>
@@ -96,6 +100,60 @@ namespace {
     ScriptUiBridge& bridge(void)
     {
         return ScriptRunner::get().bridge();
+    }
+
+    // Layout must match the registered "struct directory { int count; char** files; }".
+    struct dirData {
+        int count;
+        char** files;
+    };
+
+    dirData* makeDirData(const std::vector<std::string>& names)
+    {
+        dirData* ret = (dirData*)malloc(sizeof(dirData));
+        if (ret) {
+            ret->count = (int)names.size();
+            ret->files = names.empty() ? nullptr : (char**)malloc(sizeof(char*) * names.size());
+            if (ret->files) {
+                for (size_t i = 0; i < names.size(); i++) {
+                    ret->files[i] = (char*)strToRet(names[i]);
+                }
+            }
+            else {
+                ret->count = 0;
+            }
+        }
+        return ret;
+    }
+
+    // sav_* handle table. Slots hold the opened archive plus what commit means
+    // for it; ckpt_sav_close_all wipes it after every run.
+    struct SavSlot {
+        ArchiveHandle arch;
+        bool commitable = false; // CTR save archive: commit + secure-value fix
+        u32 uniqueId    = 0;     // for the secure-value fix
+    };
+    constexpr int MAX_SAV_HANDLES = 8;
+    SavSlot savSlots[MAX_SAV_HANDLES];
+
+    // Fails the script on a stale/invalid handle (longjmp; call it before any
+    // local C++ object exists in the binding).
+    SavSlot& savAt(struct ParseState* Parser, int h)
+    {
+        if (h < 0 || h >= MAX_SAV_HANDLES || !savSlots[h].arch) {
+            ProgramFail(Parser, "invalid save handle %d", h);
+        }
+        return savSlots[h];
+    }
+
+    // Script paths are archive-absolute; tolerate a missing leading slash.
+    std::u16string archivePath(const char* path)
+    {
+        std::string p = path;
+        if (p.empty() || p[0] != '/') {
+            p = "/" + p;
+        }
+        return StringUtils::UTF8toUTF16(p.c_str());
     }
 }
 
@@ -172,12 +230,6 @@ void ckpt_title_backup_path(struct ParseState* Parser, struct Value* ReturnValue
 
 void ckpt_read_directory(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
 {
-    // Layout must match the registered "struct directory { int count; char** files; }".
-    struct dirData {
-        int count;
-        char** files;
-    };
-
     const std::string dir = (char*)Param[0]->Val->Pointer;
     std::vector<std::string> names;
     if (DIR* d = opendir(dir.c_str())) {
@@ -190,29 +242,11 @@ void ckpt_read_directory(struct ParseState* Parser, struct Value* ReturnValue, s
         closedir(d);
     }
 
-    dirData* ret = (dirData*)malloc(sizeof(dirData));
-    if (ret) {
-        ret->count = (int)names.size();
-        ret->files = names.empty() ? nullptr : (char**)malloc(sizeof(char*) * names.size());
-        if (ret->files) {
-            for (size_t i = 0; i < names.size(); i++) {
-                ret->files[i] = (char*)strToRet(names[i]);
-            }
-        }
-        else {
-            ret->count = 0;
-        }
-    }
-    ReturnValue->Val->Pointer = ret;
+    ReturnValue->Val->Pointer = makeDirData(names);
 }
 
 void ckpt_delete_directory(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
 {
-    struct dirData {
-        int count;
-        char** files;
-    };
-
     dirData* dir = (dirData*)Param[0]->Val->Pointer;
     if (dir) {
         for (int i = 0; i < dir->count; i++) {
@@ -242,6 +276,261 @@ void ckpt_sd_exists(struct ParseState* Parser, struct Value* ReturnValue, struct
 {
     struct stat st;
     ReturnValue->Val->Integer = stat((char*)Param[0]->Val->Pointer, &st) == 0 ? 1 : 0;
+}
+
+/* ---- save archives ----------------------------------------------------- */
+
+void ckpt_sav_open(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    const int kind = Param[1]->Val->Integer;
+    if (kind != 0 && kind != 1) {
+        ProgramFail(Parser, "save kind %d must be 0 (save) or 1 (extdata)", kind);
+    }
+    Title title = titleAt(Parser, Param[0]->Val->Integer);
+
+    int slot = -1;
+    for (int i = 0; i < MAX_SAV_HANDLES && slot < 0; i++) {
+        if (!savSlots[i].arch) {
+            slot = i;
+        }
+    }
+    if (slot < 0) {
+        ReturnValue->Val->Integer = -2;
+        return;
+    }
+
+    // Only regular CTR saves and extdata are file-level archives; GBA VC
+    // (FSPXI raw), DSiWare (TWL FAT) and SPI cart saves are not reachable here.
+    if (kind == 0) {
+        const bool spiCart = title.mediaType() == MEDIATYPE_GAME_CARD && title.cardType() != CARD_CTR;
+        if (!title.accessibleSave() || title.isGBAVC() || title.isDSiWare() || spiCart) {
+            ReturnValue->Val->Integer = -1;
+            return;
+        }
+    }
+    else if (!title.accessibleExtdata()) {
+        ReturnValue->Val->Integer = -1;
+        return;
+    }
+
+    Result res           = 0;
+    ArchiveHandle handle = title.backup(kind == 0 ? BackupKind::Save : BackupKind::Extdata).open(res);
+    if (!handle) {
+        ReturnValue->Val->Integer = R_FAILED(res) ? (int)res : -1;
+        return;
+    }
+
+    savSlots[slot].arch       = std::move(handle);
+    savSlots[slot].commitable = kind == 0;
+    savSlots[slot].uniqueId   = title.uniqueId();
+    ReturnValue->Val->Integer = slot;
+}
+
+void ckpt_sav_read(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    SavSlot& slot = savAt(Parser, Param[0]->Val->Integer);
+    char** out    = (char**)Param[2]->Val->Pointer;
+    int* outSize  = (int*)Param[3]->Val->Pointer;
+    *out          = nullptr;
+    *outSize      = 0;
+
+    FSStream stream(slot.arch.fs(), archivePath((char*)Param[1]->Val->Pointer), FS_OPEN_READ);
+    if (!stream.good()) {
+        const Result res = stream.result();
+        stream.close();
+        ReturnValue->Val->Integer = (int)res;
+        return;
+    }
+
+    const u32 size = stream.size();
+    char* buf      = (char*)malloc(size + 1);
+    if (!buf) {
+        stream.close();
+        ReturnValue->Val->Integer = -3;
+        return;
+    }
+
+    const u32 read   = stream.read(buf, size);
+    const Result res = stream.result();
+    stream.close();
+    if (read != size && R_FAILED(res)) {
+        free(buf);
+        ReturnValue->Val->Integer = (int)res;
+        return;
+    }
+
+    buf[read]                 = '\0';
+    *out                      = buf;
+    *outSize                  = (int)read;
+    ReturnValue->Val->Integer = 0;
+}
+
+void ckpt_sav_write(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    SavSlot& slot  = savAt(Parser, Param[0]->Val->Integer);
+    const int size = Param[3]->Val->Integer;
+    if (size < 0) {
+        ProgramFail(Parser, "sav_write size must not be negative");
+    }
+
+    // Create/replace: the create-on-open path keeps an existing file's size, so
+    // drop it first (a missing file fails harmlessly).
+    const std::u16string path = archivePath((char*)Param[1]->Val->Pointer);
+    FSUSER_DeleteFile(slot.arch.fs(), fsMakePath(PATH_UTF16, path.data()));
+
+    FSStream stream(slot.arch.fs(), path, FS_OPEN_WRITE, (u32)size);
+    if (!stream.good()) {
+        const Result res = stream.result();
+        stream.close();
+        ReturnValue->Val->Integer = (int)res;
+        return;
+    }
+
+    const u32 written = stream.write(Param[2]->Val->Pointer, (u32)size);
+    const Result res  = stream.result();
+    stream.close();
+    ReturnValue->Val->Integer = written == (u32)size ? 0 : (R_FAILED(res) ? (int)res : -3);
+}
+
+void ckpt_sav_delete(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    SavSlot& slot             = savAt(Parser, Param[0]->Val->Integer);
+    const std::u16string path = archivePath((char*)Param[1]->Val->Pointer);
+    ReturnValue->Val->Integer = (int)FSUSER_DeleteFile(slot.arch.fs(), fsMakePath(PATH_UTF16, path.data()));
+}
+
+void ckpt_sav_list(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    SavSlot& slot = savAt(Parser, Param[0]->Val->Integer);
+
+    // Returned entries are archive-absolute like read_directory's; folders get
+    // a trailing '/'.
+    std::string prefix = (char*)Param[1]->Val->Pointer;
+    if (prefix.empty() || prefix[0] != '/') {
+        prefix = "/" + prefix;
+    }
+    if (prefix.back() != '/') {
+        prefix += '/';
+    }
+
+    Directory items(slot.arch.fs(), StringUtils::UTF8toUTF16(prefix.c_str()));
+    if (!items.good()) {
+        ReturnValue->Val->Pointer = nullptr;
+        return;
+    }
+
+    std::vector<std::string> names;
+    for (size_t i = 0, sz = items.size(); i < sz; i++) {
+        names.push_back(prefix + StringUtils::UTF16toUTF8(items.entry(i)) + (items.folder(i) ? "/" : ""));
+    }
+    ReturnValue->Val->Pointer = makeDirData(names);
+}
+
+void ckpt_sav_commit(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    SavSlot& slot = savAt(Parser, Param[0]->Val->Integer);
+    if (!slot.commitable) {
+        ReturnValue->Val->Integer = 0; // extdata needs no commit
+        return;
+    }
+
+    Result res = FSUSER_ControlArchive(slot.arch.fs(), ARCHIVE_ACTION_COMMIT_SAVE_DATA, NULL, 0, NULL, 0);
+    if (R_SUCCEEDED(res)) {
+        // Same epilogue as restore: drop the secure value so the game accepts
+        // the modified save instead of flagging a rollback.
+        u8 out;
+        u64 secureValue = ((u64)SECUREVALUE_SLOT_SD << 32) | (slot.uniqueId << 8);
+        res             = FSUSER_ControlSecureSave(SECURESAVE_ACTION_DELETE, &secureValue, 8, &out, 1);
+    }
+    ReturnValue->Val->Integer = (int)res;
+}
+
+void ckpt_sav_close(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    // Lenient on purpose: closing an already-closed or bogus handle is a no-op
+    // so cleanup paths in scripts can close unconditionally.
+    const int h = Param[0]->Val->Integer;
+    if (h >= 0 && h < MAX_SAV_HANDLES) {
+        savSlots[h] = SavSlot{};
+    }
+}
+
+void ckpt_sav_close_all(void)
+{
+    for (int i = 0; i < MAX_SAV_HANDLES; i++) {
+        savSlots[i] = SavSlot{};
+    }
+}
+
+/* ---- network ----------------------------------------------------------- */
+
+namespace {
+    size_t curlWriteToString(char* ptr, size_t size, size_t nmemb, void* userdata)
+    {
+        ((std::string*)userdata)->append(ptr, size * nmemb);
+        return size * nmemb;
+    }
+}
+
+void ckpt_net_ip(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    ReturnValue->Val->Pointer = strToRet(getConsoleIP());
+}
+
+void ckpt_web_get(struct ParseState* Parser, struct Value* ReturnValue, struct Value** Param, int NumArgs)
+{
+    char** out   = (char**)Param[0]->Val->Pointer;
+    int* outSize = (int*)Param[1]->Val->Pointer;
+    char* url    = (char*)Param[2]->Val->Pointer;
+    *out         = nullptr;
+    *outSize     = 0;
+
+    // Lazy so curl costs nothing until a script actually fetches. Single script
+    // thread + one run at a time, so no init race.
+    static bool curlReady = false;
+    if (!curlReady) {
+        curlReady = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
+    }
+    CURL* curl = curlReady ? curl_easy_init() : nullptr;
+    if (!curl) {
+        ReturnValue->Val->Integer = -1;
+        return;
+    }
+
+    std::string data;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteToString);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Checkpoint-curl");
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 300L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 10L);
+
+    const CURLcode code = curl_easy_perform(curl);
+    long status         = 0;
+    if (code == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    }
+    curl_easy_cleanup(curl);
+
+    if (code != CURLE_OK) {
+        Logging::warning("[script] web_get '{}' failed: {}", url, curl_easy_strerror(code));
+        ReturnValue->Val->Integer = -((int)code + 100);
+        return;
+    }
+
+    char* buf = (char*)malloc(data.size() + 1);
+    if (!buf) {
+        ReturnValue->Val->Integer = -1;
+        return;
+    }
+    memcpy(buf, data.data(), data.size());
+    buf[data.size()]          = '\0';
+    *out                      = buf;
+    *outSize                  = (int)data.size();
+    ReturnValue->Val->Integer = (int)status;
 }
 
 /* ---- gui -------------------------------------------------------------- */

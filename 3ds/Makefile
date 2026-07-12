@@ -98,7 +98,7 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -std=gnu++23
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lcitro2d -lcitro3d -lctru -lm
+LIBS	:= -lcitro2d -lcitro3d -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lctru -lm
 
 CCACHE	:=	$(shell command -v ccache 2>/dev/null)
 ifneq ($(strip $(CCACHE)),)
