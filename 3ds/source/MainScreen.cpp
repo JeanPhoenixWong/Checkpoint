@@ -26,6 +26,8 @@
 
 #include "MainScreen.hpp"
 #include "KeyboardManager.hpp"
+#include "ScriptPickerOverlay.hpp"
+#include "ScriptRequestOverlays.hpp"
 #include "SettingsScreen.hpp"
 #include "backupsize.hpp"
 #include "backuptarget.hpp"
@@ -34,7 +36,9 @@
 #include "io.hpp"
 #include "loader.hpp"
 #include "outcomemessages.hpp"
+#include "paths.hpp"
 #include "progress.hpp"
+#include "scriptrunner.hpp"
 #include "server.hpp"
 #include "textpool.hpp"
 #include "transfer.hpp"
@@ -104,25 +108,23 @@ MainScreen::MainScreen(void) : hid(rowlen * collen, collen)
     refreshTimer    = 0;
     transferEnabled = Configuration::getInstance().transferEnabled();
 
-    // Detail action buttons. Backup is the primary (accent), Restore secondary.
-    buttonBackup  = std::make_unique<Clickable>(8, 182, 148, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup") + " ", true);
-    buttonRestore = std::make_unique<Clickable>(164, 182, 148, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.restore") + " ", true);
-    // Narrower Backup/Restore + Coins trio shown side by side on the Activity Log title.
+    // Detail action row: three 96px slots. Backup is the primary (accent),
+    // Restore secondary, the middle slot contextual - Scripts by default, Send
+    // on a highlighted backup, Coins on the Activity Log.
     buttonBackupAL  = std::make_unique<Clickable>(8, 182, 96, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup_short"), true);
     buttonPlayCoins = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.coins"), true);
     buttonRestoreAL = std::make_unique<Clickable>(216, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.restore_short"), true);
     // Full-width batch-backup button shown only while multi-selecting.
     buttonBackupAll = std::make_unique<Clickable>(8, 182, 304, 30, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup_selected"), true);
-    // Middle of the contextual Backup / Send / Restore trio (same 96px trio geometry as the Activity Log row).
-    buttonSend    = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("transfer.send"), true);
-    directoryList = std::make_unique<BackupList>(12, 70, 296, 106, 5);
-    buttonBackup->canChangeColorWhenSelected(true);
+    buttonSend      = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("transfer.send"), true);
+    buttonScripts   = std::make_unique<Clickable>(112, 182, 96, 30, COLOR_RAISED, COLOR_TEXT, i18n::t("main.scripts"), true);
+    directoryList   = std::make_unique<BackupList>(12, 70, 296, 106, 5);
     buttonBackupAll->canChangeColorWhenSelected(true);
-    buttonRestore->canChangeColorWhenSelected(true);
     buttonPlayCoins->canChangeColorWhenSelected(true);
     buttonBackupAL->canChangeColorWhenSelected(true);
     buttonRestoreAL->canChangeColorWhenSelected(true);
     buttonSend->canChangeColorWhenSelected(true);
+    buttonScripts->canChangeColorWhenSelected(true);
 
     ver = StringUtils::versionString();
 
@@ -266,7 +268,16 @@ void MainScreen::drawTop(void) const
     static constexpr int TOP_FOOTER_TOP = 222;
     C2D_DrawRectSolid(0, TOP_FOOTER_TOP, 0.5f, 400, 240 - TOP_FOOTER_TOP, COLOR_SURFACE);
     C2D_DrawRectSolid(0, TOP_FOOTER_TOP - 1, 0.5f, 400, 1, COLOR_LINE);
-    if (multi) {
+    if (ScriptRunner::get().active()) {
+        // Script status strip: name + last gui_status text from the worker.
+        std::string line   = i18n::t("scripts.running", {ScriptRunner::get().scriptName()});
+        std::string status = ScriptRunner::get().bridge().statusText();
+        if (!status.empty()) {
+            line += "  -  " + status;
+        }
+        drawHints(400, 224, line);
+    }
+    else if (multi) {
         drawHints(400, 224, " Tag     hold all     Backup all     Clear");
     }
     else {
@@ -376,10 +387,12 @@ void MainScreen::drawBottom(void) const
             buttonRestoreAL->draw(0.6f, COLOR_RING);
         }
         else {
-            buttonBackup->text(i18n::t("main.backup") + " ");
-            buttonRestore->text(i18n::t("main.restore") + " ");
-            buttonBackup->draw(0.6f, COLOR_RING);
-            buttonRestore->draw(0.6f, COLOR_RING);
+            buttonBackupAL->text(i18n::t("main.backup_short"));
+            buttonScripts->text(i18n::t("main.scripts"));
+            buttonRestoreAL->text(i18n::t("main.restore_short"));
+            buttonBackupAL->draw(0.6f, COLOR_RING);
+            buttonScripts->draw(0.6f, COLOR_ACCENT);
+            buttonRestoreAL->draw(0.6f, COLOR_RING);
         }
     }
 
@@ -512,6 +525,26 @@ void MainScreen::update(const InputState& input)
     }
 
     if (TransferJob::get().active()) {
+        return;
+    }
+
+    // Script outcome / activity. While a script runs this screen only pumps its
+    // UI-bridge requests; normal input is ignored (same policy as TransferJob).
+    if (auto script = ScriptRunner::get().takeResult()) {
+        aptSetHomeAllowed(true);
+        if (script->exitValue == 0) {
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("scripts.success", {script->scriptName}));
+        }
+        else {
+            // The output tail carries picoc's diagnostic; the card fits a few lines.
+            std::string detail = script->output.size() > 120 ? script->output.substr(script->output.size() - 120) : script->output;
+            currentOverlay     = std::make_shared<ErrorOverlay>(
+                *this, script->exitValue, i18n::t("scripts.failed", {script->scriptName}) + (detail.empty() ? "" : "\n" + detail));
+        }
+        return;
+    }
+    if (ScriptRunner::get().active()) {
+        pumpScriptRequests();
         return;
     }
 
@@ -683,6 +716,79 @@ void MainScreen::requestRestore(size_t cellIndex)
     }
 }
 
+void MainScreen::startScriptPicker(void)
+{
+    if (TitleCatalog::get().progress().active || TransferJob::get().active() || ScriptRunner::get().active()) {
+        return;
+    }
+
+    const bool hasTitle = selected.valid;
+    const u64 titleId   = selected.id;
+    auto entries        = ScriptCatalog::scan(Paths::universalScriptsDir(), hasTitle ? Paths::scriptsDirFor(titleId) : "");
+    currentOverlay      = std::make_shared<ScriptPickerOverlay>(
+        *this, std::move(entries), hasTitle ? selected.name : "", [this, hasTitle, titleId](const ScriptCatalog::Entry& entry) {
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, i18n::t("scripts.confirm_run", {entry.name}),
+                [this, entry, hasTitle, titleId]() {
+                    this->removeOverlay();
+                    std::string idHex = hasTitle ? StringUtils::format("%016llX", titleId) : "";
+                    // HOME stays blocked for the whole run (PKSM precedent): picoc
+                    // cannot be preempted, so a buggy script requires a reboot.
+                    aptSetHomeAllowed(false);
+                    if (!ScriptRunner::get().start(entry.path, entry.name, std::move(idHex))) {
+                        aptSetHomeAllowed(true);
+                        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("scripts.start_failed"));
+                    }
+                },
+                [this]() { this->removeOverlay(); });
+        });
+}
+
+void MainScreen::pumpScriptRequests(void)
+{
+    ScriptUiBridge& bridge = ScriptRunner::get().bridge();
+    const UiRequest* req   = bridge.pending();
+    if (!req) {
+        return;
+    }
+
+    // This runs only while no overlay is up (an overlay's update replaces the
+    // screen's), so each pending request is mapped to its overlay exactly once;
+    // the overlay answers the bridge before dismissing itself.
+    switch (req->kind) {
+        case UiRequest::Kind::Message:
+            currentOverlay = std::make_shared<ScriptMessageOverlay>(*this, req->prompt);
+            break;
+        case UiRequest::Kind::Confirm:
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, req->prompt,
+                [this]() {
+                    UiResponse resp;
+                    resp.confirmed = true;
+                    ScriptRunner::get().bridge().respond(std::move(resp));
+                    this->removeOverlay();
+                },
+                [this]() {
+                    ScriptRunner::get().bridge().respond(UiResponse{});
+                    this->removeOverlay();
+                });
+            break;
+        case UiRequest::Kind::PickOne:
+            currentOverlay = std::make_shared<ScriptPickOneOverlay>(*this, req->prompt, req->items);
+            break;
+        case UiRequest::Kind::PickMany:
+            currentOverlay = std::make_shared<ScriptPickManyOverlay>(*this, req->prompt, req->items, req->preselected);
+            break;
+        case UiRequest::Kind::Keyboard: {
+            // swkbd runs on the main thread - the reason the bridge exists.
+            UiResponse resp;
+            resp.text = KeyboardManager::get().text("", req->prompt, req->maxChars > 0 ? (size_t)req->maxChars - 1 : 0);
+            bridge.respond(std::move(resp));
+            break;
+        }
+    }
+}
+
 void MainScreen::handleEvents(const InputState& input)
 {
     u32 kDown = hidKeysDown();
@@ -815,12 +921,17 @@ void MainScreen::handleEvents(const InputState& input)
     // goes straight to startTransferSend() (which validates and prompts).
     const bool sendContext = transferEnabled && selected.valid && !activityLog && g_bottomScrollEnabled && directoryList->index() > 0 &&
                              !isReceiveRow(directoryList->index());
-    // Both the Activity Log and the send-context layouts use the narrow 96px
-    // Backup/Restore (buttonBackupAL/buttonRestoreAL) buttons.
-    const bool useTrio = activityLog || sendContext;
 
     if (sendContext && buttonSend->released()) {
         startTransferSend();
+        return;
+    }
+
+    // The default action row shows the Scripts middle button (everywhere except
+    // multi-select, the Activity Log and the send context).
+    const bool scriptsShown = !MS::multipleSelectionEnabled() && !activityLog && !sendContext;
+    if (scriptsShown && buttonScripts->released()) {
+        startScriptPicker();
         return;
     }
 
@@ -839,7 +950,7 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
     else {
-        if ((useTrio ? buttonBackupAL : buttonBackup)->released() || (kDown & KEY_L)) {
+        if (buttonBackupAL->released() || (kDown & KEY_L)) {
             if (g_bottomScrollEnabled) {
                 currentOverlay = std::make_shared<YesNoOverlay>(
                     *this, i18n::t("main.confirm_backup_save"),
@@ -854,7 +965,7 @@ void MainScreen::handleEvents(const InputState& input)
             }
         }
 
-        if ((useTrio ? buttonRestoreAL : buttonRestore)->released() || (kDown & KEY_R)) {
+        if (buttonRestoreAL->released() || (kDown & KEY_R)) {
             size_t row = directoryList->index();
             if (g_bottomScrollEnabled && row > 0 && !isReceiveRow(row)) {
                 requestRestore(rowToCell(row));
@@ -872,25 +983,16 @@ void MainScreen::handleEvents(const InputState& input)
 void MainScreen::updateButtons(void)
 {
     if (MS::multipleSelectionEnabled()) {
-        buttonBackup->setColors(COLOR_ACCENT, COLOR_WHITE);
-        buttonRestore->setColors(COLOR_RAISED, COLOR_MUTED);
         buttonPlayCoins->setColors(COLOR_RAISED, COLOR_MUTED);
         buttonBackupAL->setColors(COLOR_ACCENT, COLOR_WHITE);
         buttonRestoreAL->setColors(COLOR_RAISED, COLOR_MUTED);
-    }
-    else if (g_bottomScrollEnabled) {
-        buttonBackup->setColors(COLOR_ACCENT, COLOR_WHITE);
-        buttonRestore->setColors(COLOR_RAISED, COLOR_TEXT);
-        buttonPlayCoins->setColors(COLOR_RAISED, COLOR_TEXT);
-        buttonBackupAL->setColors(COLOR_ACCENT, COLOR_WHITE);
-        buttonRestoreAL->setColors(COLOR_RAISED, COLOR_TEXT);
+        buttonScripts->setColors(COLOR_RAISED, COLOR_MUTED);
     }
     else {
-        buttonBackup->setColors(COLOR_ACCENT, COLOR_WHITE);
-        buttonRestore->setColors(COLOR_RAISED, COLOR_TEXT);
         buttonPlayCoins->setColors(COLOR_RAISED, COLOR_TEXT);
         buttonBackupAL->setColors(COLOR_ACCENT, COLOR_WHITE);
         buttonRestoreAL->setColors(COLOR_RAISED, COLOR_TEXT);
+        buttonScripts->setColors(COLOR_RAISED, COLOR_TEXT);
     }
 }
 

@@ -30,10 +30,8 @@
 #include "colors.hpp"
 #include "configuration.hpp"
 #include "ftpserver.hpp"
-#include "io.hpp"
 #include "loader.hpp"
-#include "paths.hpp"
-#include "scriptengine.hpp"
+#include "scriptrunner.hpp"
 #include "server.hpp"
 #include "textpool.hpp"
 #include "thread.hpp"
@@ -71,19 +69,6 @@ int main()
         // Match the color tokens to the persisted theme before any screen draws.
         Colors::apply(Configuration::getInstance().theme());
 
-        // TEMPORARY (scripting phase 0): if a script is sitting at
-        // /3ds/Checkpoint/scripts/universal/hello.c, run it headlessly at boot and
-        // log what it printed. Goes away once the Scripts action and ScriptRunner
-        // land in phase 1.
-        {
-            const std::string hello = Paths::universalScriptsDir() + "/hello.c";
-            if (io::fileExists(hello)) {
-                aptSetHomeAllowed(false);
-                ScriptEngine::run(hello, {""});
-                aptSetHomeAllowed(true);
-            }
-        }
-
         g_screen       = std::make_unique<MainScreen>();
         auto uiIsReady = std::chrono::high_resolution_clock::now();
         Logging::info("Loading took {} ms", std::chrono::duration_cast<std::chrono::milliseconds>(uiIsReady - start).count());
@@ -94,7 +79,8 @@ int main()
             hidTouchRead(&touch);
 
             if (hidKeysDown() & KEY_START) {
-                if (g_screen->allowsExit() && !TitleCatalog::get().progress().active && !TransferJob::get().active()) {
+                if (g_screen->allowsExit() && !TitleCatalog::get().progress().active && !TransferJob::get().active() &&
+                    !ScriptRunner::get().active()) {
                     break;
                 }
             }
