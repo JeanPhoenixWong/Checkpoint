@@ -57,6 +57,19 @@ CKPT_BINDING(ckpt_delete_directory);
 CKPT_BINDING(ckpt_sd_mkdirs);
 CKPT_BINDING(ckpt_sd_exists);
 
+/* save archives (kind: 0=save, 1=extdata; fixed table of 8 handles) */
+CKPT_BINDING(ckpt_sav_open);
+CKPT_BINDING(ckpt_sav_read);
+CKPT_BINDING(ckpt_sav_write);
+CKPT_BINDING(ckpt_sav_delete);
+CKPT_BINDING(ckpt_sav_list);
+CKPT_BINDING(ckpt_sav_commit);
+CKPT_BINDING(ckpt_sav_close);
+
+/* network */
+CKPT_BINDING(ckpt_net_ip);
+CKPT_BINDING(ckpt_web_get);
+
 /* gui (block the script thread on the UI bridge) */
 CKPT_BINDING(ckpt_gui_message);
 CKPT_BINDING(ckpt_gui_confirm);
@@ -87,6 +100,11 @@ CKPT_BINDING(ckpt_json_object_key);
 /* misc */
 CKPT_BINDING(ckpt_script_log);
 CKPT_BINDING(ckpt_selected_title);
+
+/* not a binding: ScriptRunner calls this after every run (whatever the exit
+ * path — normal return, script exit(), parse error longjmp) so a script that
+ * forgot sav_close never leaks an open archive into the next run. */
+void ckpt_sav_close_all(void);
 
 #ifdef __cplusplus
 }
