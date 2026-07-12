@@ -65,6 +65,25 @@ CKPT_BINDING(ckpt_gui_pick_many);
 CKPT_BINDING(ckpt_gui_keyboard);
 CKPT_BINDING(ckpt_gui_status);
 
+/* json (platform-neutral, common/script/json_api.cpp) */
+CKPT_BINDING(ckpt_json_new);
+CKPT_BINDING(ckpt_json_parse);
+CKPT_BINDING(ckpt_json_delete);
+CKPT_BINDING(ckpt_json_is_valid);
+CKPT_BINDING(ckpt_json_is_int);
+CKPT_BINDING(ckpt_json_is_bool);
+CKPT_BINDING(ckpt_json_is_string);
+CKPT_BINDING(ckpt_json_is_array);
+CKPT_BINDING(ckpt_json_is_object);
+CKPT_BINDING(ckpt_json_get_int);
+CKPT_BINDING(ckpt_json_get_bool);
+CKPT_BINDING(ckpt_json_get_string);
+CKPT_BINDING(ckpt_json_array_size);
+CKPT_BINDING(ckpt_json_array_element);
+CKPT_BINDING(ckpt_json_object_contains);
+CKPT_BINDING(ckpt_json_object_element);
+CKPT_BINDING(ckpt_json_object_key);
+
 /* misc */
 CKPT_BINDING(ckpt_script_log);
 CKPT_BINDING(ckpt_selected_title);
