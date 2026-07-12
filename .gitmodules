@@ -1,0 +1,3 @@
+[submodule "3rd-party/picoc"]
+	path = 3rd-party/picoc
+	url = https://github.com/FlagBrew/picoc

@@ -42,6 +42,13 @@ namespace Paths {
     // "/3ds/Checkpoint" — the app root under which every backup tree lives.
     const char* checkpointRoot(void);
 
+    // "/3ds/Checkpoint/scripts" — the drop-in point for PicoC scripts. Its
+    // "universal" subfolder holds title-independent scripts; a subfolder named
+    // after a 16-hex-uppercase title id holds that title's own.
+    const char* scriptsRoot(void);
+    std::string universalScriptsDir(void);
+    std::string scriptsDirFor(u64 id);
+
     // Backup roots, trailing slash included so a folder name concatenates
     // directly: savesRoot() + folder.
     std::u16string savesRoot(void);

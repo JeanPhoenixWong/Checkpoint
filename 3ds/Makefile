@@ -38,11 +38,14 @@ APP_AUTHOR		:=	Bernardo Giordano, FlagBrew
 TARGET			:=	$(subst $e ,_,$(notdir $(APP_TITLE)))
 OUTDIR			:=	out
 BUILD			:=	build
-FORMATSOURCES	:=	source ../common
-SOURCES			:=	$(FORMATSOURCES) ../3rd-party/sha256 ../3rd-party/ftp
+FORMATSOURCES	:=	source ../common ../common/script
+SOURCES			:=	$(FORMATSOURCES) ../3rd-party/sha256 ../3rd-party/ftp \
+					../common/script/cstdlib \
+					../3rd-party/picoc/source/interpreter
 DATA			:=	data
-FORMATINCLUDES	:=	include ../common
-INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256 ../3rd-party/ftp
+FORMATINCLUDES	:=	include ../common ../common/script
+INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256 ../3rd-party/ftp \
+					../3rd-party/picoc/include
 GRAPHICS		:=	assets/gfx
 ROMFS			:=	assets/romfs
 GFXBUILD		:=	$(ROMFS)/gfx
@@ -85,6 +88,10 @@ CFLAGS	:=	-g -gdwarf-4 -Wall -Wextra -Wno-psabi -O3 -mword-relocations -flto=aut
 			-DSOCK_BUFFERSIZE=32768
 
 CFLAGS	+=	$(INCLUDE) -DARM11 -D__3DS__ -D_GNU_SOURCE=1
+
+# picoc: UNIX_HOST is the only host flavour that fits newlib (the alternative is
+# MSVC). Its platform.h comes from common/script, not the submodule.
+CFLAGS	+=	-DUNIX_HOST
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -std=gnu++23
 
