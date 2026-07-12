@@ -68,7 +68,8 @@ void ChoiceOverlay::update(const InputState& input)
 
     for (size_t i = 0; i < 2; i++) {
         if (mClick[i]->released() || (kDown & mButtons[i].extraKeys) || ((kDown & KEY_A) && mHid.index() == i)) {
-            mButtons[i].action();
+            auto action = mButtons[i].action; // copy to the stack: the callback may removeOverlay(), destroying *this
+            action();
             return;
         }
     }
