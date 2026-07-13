@@ -26,6 +26,7 @@
 
 #include "KeyboardManager.hpp"
 #include "backupsize.hpp"
+#include <vector>
 
 KeyboardManager::KeyboardManager(void)
 {
@@ -61,4 +62,30 @@ std::pair<bool, std::string> KeyboardManager::keyboard(const std::string& sugges
         }
     }
     return std::make_pair(false, suggestion);
+}
+
+std::string KeyboardManager::text(const std::string& suggestion, const std::string& hint, size_t maxLen)
+{
+    if (!systemKeyboardAvailable || maxLen == 0) {
+        return "";
+    }
+
+    // Same PauseGuard rationale as keyboard(): the size-cache walk delays the
+    // swkbd applet launch by the walk's full remaining duration.
+    BackupSizeCache::PauseGuard pauseWalk;
+    SwkbdConfig kbd;
+    std::string out;
+    if (R_SUCCEEDED(swkbdCreate(&kbd, 0))) {
+        swkbdConfigMakePresetDefault(&kbd);
+        swkbdConfigSetGuideText(&kbd, hint.c_str());
+        swkbdConfigSetInitialText(&kbd, suggestion.c_str());
+        swkbdConfigSetStringLenMax(&kbd, maxLen);
+        std::vector<char> buf(maxLen * 4 + 1, 0); // UTF-8 worst case per char
+        Result rc = swkbdShow(&kbd, buf.data(), buf.size());
+        swkbdClose(&kbd);
+        if (R_SUCCEEDED(rc)) {
+            out = buf.data();
+        }
+    }
+    return out;
 }

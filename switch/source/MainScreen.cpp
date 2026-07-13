@@ -27,14 +27,19 @@
 #include "MainScreen.hpp"
 #include "KeyboardManager.hpp"
 #include "ReceiveOverlay.hpp"
+#include "ScriptPickerOverlay.hpp"
+#include "ScriptRequestOverlays.hpp"
 #include "SettingsScreen.hpp"
 #include "backupsize.hpp"
 #include "configuration.hpp"
 #include "gfxutils.hpp"
 #include "i18n.hpp"
 #include "main.hpp"
+#include "paths.hpp"
 #include "savedatasource.hpp"
 #include "savekind.hpp"
+#include "scriptcatalog.hpp"
+#include "scriptrunner.hpp"
 #include "shapes.hpp"
 #include "titlecatalog.hpp"
 #include "transfer.hpp"
@@ -222,9 +227,10 @@ MainScreen::MainScreen(const InputState&)
     backupList    = std::make_unique<BackupList>(COL_X, LIST_Y, COL_W, LIST_ROWS * BackupList::ROW_PITCH, LIST_ROWS);
     buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup"), true);
     buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("main.restore"), true);
-    // Send is a full-width button stacked above Backup (Receive now lives inside
-    // the backup list, mirroring the 3DS layout). Contextual: only shown when an
-    // existing backup is highlighted.
+    // Contextual slot stacked above Backup (Receive lives inside the backup
+    // list, mirroring the 3DS layout): Send when an existing backup is
+    // highlighted, Scripts otherwise. The Clickable only hit-tests touches;
+    // the label drawn comes from drawActionButton.
     buttonSend = std::make_unique<Clickable>(COL_X, BTN_TRANSFER_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("transfer.send"), true);
 
     // The rail Clickables exist only so released() can hit-test touches; the
@@ -507,14 +513,12 @@ void MainScreen::draw() const
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
-            // Send sits above Backup/Restore, bound to ZR. Always shown in its
-            // slot, but greyed (disabled) unless a highlighted existing backup can
-            // be sent — i.e. it stays inactive while the "New..." or "Receive" rows
-            // are hovered.
-            if (Configuration::getInstance().isTransferEnabled()) {
-                const bool sendCtx = backupScrollEnabled && backupList->index() != 0 && !backupList->isReceiveRow(backupList->index());
-                drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "ZR", sendCtx, BTN_W, sendCtx);
-            }
+            // The slot above Backup/Restore is contextual (3DS parity): Send when
+            // wireless transfer is on and a highlighted existing backup can be
+            // sent, Scripts otherwise. Both live on ZR.
+            const bool sendCtx = Configuration::getInstance().isTransferEnabled() && backupScrollEnabled && backupList->index() != 0 &&
+                                 !backupList->isReceiveRow(backupList->index());
+            drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t(sendCtx ? "transfer.send" : "main.scripts"), "ZR", true);
             drawActionButton(COL_X, BTN_BACKUP_Y, i18n::t("main.backup"), "L", true);
             drawActionButton(COL_X, BTN_RESTORE_Y, i18n::t("main.restore"), "R", false);
         }
@@ -535,6 +539,30 @@ void MainScreen::draw() const
         {"Y", i18n::t("hint.multiselect")},
         {"-", i18n::t("hint.settings")},
     });
+
+    // ---- Script status ----
+    // While a script runs, a small modal shows its name and last gui_status
+    // line; the script's own requests raise full overlays on top of this.
+    if (ScriptRunner::get().active()) {
+        Gfx::DrawRect(0, 0, 1280, 720, COLOR_SCRIM);
+
+        const int mw = 540, mh = 160;
+        const int mx = (1280 - mw) / 2, my = (720 - mh) / 2;
+        Shapes::cardRound(mx, my, mw, mh, 0, COLOR_SURFACE, COLOR_STROKE2, 1);
+
+        std::string titleStr = i18n::t("scripts.running", {ScriptRunner::get().scriptName()});
+        u32 tw, th;
+        Gfx::GetTextDimensions(20, titleStr.c_str(), &tw, &th);
+        Gfx::DrawText(20, mx + (mw - (int)tw) / 2, my + 36, COLOR_TEXT, titleStr.c_str());
+
+        std::string status = ScriptRunner::get().bridge().statusText();
+        if (!status.empty()) {
+            status = trimToFit(status, mw - 48, 15);
+            u32 sw;
+            Gfx::GetTextDimensions(15, status.c_str(), &sw, NULL);
+            Gfx::DrawText(15, mx + (mw - (int)sw) / 2, my + 36 + (int)th + 18, COLOR_TEXT2, status.c_str());
+        }
+    }
 
     // ---- Transfer modal ----
     const TransferSnapshot transfer = TransferStatus::snapshot();
@@ -714,8 +742,108 @@ void MainScreen::update(const InputState& input)
         return;
     }
 
+    // Script outcome / activity. While a script runs this screen only pumps its
+    // UI-bridge requests; normal input is ignored (same policy as TransferJob).
+    if (auto script = ScriptRunner::get().takeResult()) {
+        appletEndBlockingHomeButton();
+        if (script->exitValue == 0) {
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("scripts.success", {script->scriptName}));
+        }
+        else {
+            // The output tail carries picoc's diagnostic; the card fits a few lines.
+            std::string detail = script->output.size() > 120 ? script->output.substr(script->output.size() - 120) : script->output;
+            currentOverlay     = std::make_shared<ErrorOverlay>(
+                *this, script->exitValue, i18n::t("scripts.failed", {script->scriptName}) + (detail.empty() ? "" : "\n" + detail));
+        }
+        return;
+    }
+    if (ScriptRunner::get().active()) {
+        pumpScriptRequests();
+        return;
+    }
+
     updateSelector(input);
     handleEvents(input);
+}
+
+void MainScreen::startScriptPicker(void)
+{
+    if (TransferJob::get().active() || ScriptRunner::get().active()) {
+        return;
+    }
+
+    // The highlighted grid title (if any) picks the specific-script folder and
+    // becomes the script's selected title.
+    Title title;
+    const bool hasTitle = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter) > 0;
+    if (hasTitle) {
+        TitleCatalog::get().getFilteredTitle(title, g_currentUId, mSaveTypeFilter, mCursor);
+    }
+    const u64 titleId = hasTitle ? title.id() : 0;
+
+    auto entries   = ScriptCatalog::scan(Paths::universalScriptsDir(), hasTitle ? Paths::scriptsDirFor(titleId) : "");
+    currentOverlay = std::make_shared<ScriptPickerOverlay>(
+        *this, std::move(entries), hasTitle ? title.displayName() : "", [this, hasTitle, titleId](const ScriptCatalog::Entry& entry) {
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, i18n::t("scripts.confirm_run", {entry.name}),
+                [this, entry, hasTitle, titleId]() {
+                    this->removeOverlay();
+                    std::string idHex = hasTitle ? StringUtils::format("%016llX", (unsigned long long)titleId) : "";
+                    // HOME stays blocked for the whole run (PKSM precedent): picoc
+                    // cannot be preempted, so a buggy script requires a reboot.
+                    appletBeginBlockingHomeButton(0);
+                    if (!ScriptRunner::get().start(entry.path, entry.name, std::move(idHex))) {
+                        appletEndBlockingHomeButton();
+                        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("scripts.start_failed"));
+                    }
+                },
+                [this]() { this->removeOverlay(); });
+        });
+}
+
+void MainScreen::pumpScriptRequests(void)
+{
+    ScriptUiBridge& bridge = ScriptRunner::get().bridge();
+    const UiRequest* req   = bridge.pending();
+    if (!req) {
+        return;
+    }
+
+    // This runs only while no overlay is up (an overlay's update replaces the
+    // screen's), so each pending request is mapped to its overlay exactly once;
+    // the overlay answers the bridge before dismissing itself.
+    switch (req->kind) {
+        case UiRequest::Kind::Message:
+            currentOverlay = std::make_shared<ScriptMessageOverlay>(*this, req->prompt);
+            break;
+        case UiRequest::Kind::Confirm:
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, req->prompt,
+                [this]() {
+                    UiResponse resp;
+                    resp.confirmed = true;
+                    ScriptRunner::get().bridge().respond(std::move(resp));
+                    this->removeOverlay();
+                },
+                [this]() {
+                    ScriptRunner::get().bridge().respond(UiResponse{});
+                    this->removeOverlay();
+                });
+            break;
+        case UiRequest::Kind::PickOne:
+            currentOverlay = std::make_shared<ScriptPickOneOverlay>(*this, req->prompt, req->items);
+            break;
+        case UiRequest::Kind::PickMany:
+            currentOverlay = std::make_shared<ScriptPickManyOverlay>(*this, req->prompt, req->items, req->preselected);
+            break;
+        case UiRequest::Kind::Keyboard: {
+            // swkbd runs on the main thread - the reason the bridge exists.
+            UiResponse resp;
+            resp.text = KeyboardManager::get().text("", req->prompt, req->maxChars > 0 ? (size_t)req->maxChars - 1 : 0);
+            bridge.respond(std::move(resp));
+            break;
+        }
+    }
 }
 
 void MainScreen::updateSelector(const InputState& input)
@@ -890,10 +1018,9 @@ void MainScreen::handleEvents(const InputState& input)
     // list: switching users there would leave the open list pointing at a title of
     // the previous account (same as the avatar button, which is title-grid only).
     if (mSaveTypeFilter == FILTER_SAVES && !backupScrollEnabled) {
-        // ZR is the Send button when wireless transfer is on, so the account
-        // picker keeps ZL alone there.
-        const u64 accountKeys = Configuration::getInstance().isTransferEnabled() ? HidNpadButton_ZL : (HidNpadButton_ZL | HidNpadButton_ZR);
-        if (kdown & accountKeys) {
+        // ZR is the contextual Send/Scripts button, so the account picker
+        // lives on ZL alone.
+        if (kdown & HidNpadButton_ZL) {
             while ((g_currentUId = Account::selectAccount()) == 0)
                 ;
             this->index(TITLES, 0);
@@ -1056,16 +1183,20 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
 
-    // Wireless Send, on ZR or its touch button (gated behind the setting). Receive
-    // is now a row inside the backup list (handled by the A/touch path above). Send
-    // fires only when an existing backup is highlighted, so the "select a backup
-    // first" info box never appears.
-    if (Configuration::getInstance().isTransferEnabled()) {
+    // ZR / its touch button is contextual (3DS parity): wireless Send when an
+    // existing backup is highlighted (and transfer is on) — so the "select a
+    // backup first" info box never appears — the script picker otherwise.
+    // Receive is a row inside the backup list (handled by the A/touch path
+    // above).
+    if (!MS::multipleSelectionEnabled() && (buttonSend->released() || (kdown & HidNpadButton_ZR))) {
         const size_t row = this->index(CELLS);
-        if (backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row) && (buttonSend->released() || (kdown & HidNpadButton_ZR))) {
+        if (Configuration::getInstance().isTransferEnabled() && backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row)) {
             startTransferSend();
-            return;
         }
+        else {
+            startScriptPicker();
+        }
+        return;
     }
 }
 

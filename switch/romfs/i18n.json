@@ -1388,5 +1388,115 @@
     "pt": "Enviar / receber backups pela rede",
     "nl": "Back-ups verzenden/ontvangen via het netwerk",
     "ja": "ネットワーク経由でバックアップを送受信"
+  },
+  "main.scripts": {
+    "en": "Scripts",
+    "it": "Script",
+    "es": "Scripts",
+    "fr": "Scripts",
+    "de": "Skripte",
+    "pt": "Scripts",
+    "nl": "Scripts",
+    "ja": "スクリプト"
+  },
+  "scripts.pick_prompt": {
+    "en": "Run a script",
+    "it": "Esegui uno script",
+    "es": "Ejecutar un script",
+    "fr": "Exécuter un script",
+    "de": "Skript ausführen",
+    "pt": "Executar um script",
+    "nl": "Een script uitvoeren",
+    "ja": "スクリプトを実行"
+  },
+  "scripts.empty": {
+    "en": "No scripts found in /switch/Checkpoint/scripts",
+    "it": "Nessuno script trovato in /switch/Checkpoint/scripts",
+    "es": "No se encontraron scripts en /switch/Checkpoint/scripts",
+    "fr": "Aucun script trouvé dans /switch/Checkpoint/scripts",
+    "de": "Keine Skripte in /switch/Checkpoint/scripts gefunden",
+    "pt": "Nenhum script encontrado em /switch/Checkpoint/scripts",
+    "nl": "Geen scripts gevonden in /switch/Checkpoint/scripts",
+    "ja": "/switch/Checkpoint/scripts にスクリプトがありません"
+  },
+  "scripts.universal_tag": {
+    "en": "universal",
+    "it": "universale",
+    "es": "universal",
+    "fr": "universel",
+    "de": "universell",
+    "pt": "universal",
+    "nl": "universeel",
+    "ja": "共通"
+  },
+  "scripts.confirm_run": {
+    "en": "Run \"{0}\"?\nScripts can modify saves and SD card contents.",
+    "it": "Eseguire \"{0}\"?\nGli script possono modificare salvataggi e contenuti della scheda SD.",
+    "es": "¿Ejecutar \"{0}\"?\nLos scripts pueden modificar guardados y el contenido de la tarjeta SD.",
+    "fr": "Exécuter \"{0}\" ?\nLes scripts peuvent modifier les sauvegardes et le contenu de la carte SD.",
+    "de": "\"{0}\" ausführen?\nSkripte können Speicherstände und SD-Karten-Inhalte verändern.",
+    "pt": "Executar \"{0}\"?\nScripts podem modificar saves e o conteúdo do cartão SD.",
+    "nl": "\"{0}\" uitvoeren?\nScripts kunnen saves en de inhoud van de SD-kaart wijzigen.",
+    "ja": "\"{0}\"を実行しますか？\nスクリプトはセーブデータやSDカードの内容を変更できます。"
+  },
+  "scripts.running": {
+    "en": "Running {0}…",
+    "it": "Esecuzione di {0}…",
+    "es": "Ejecutando {0}…",
+    "fr": "Exécution de {0}…",
+    "de": "{0} läuft…",
+    "pt": "Executando {0}…",
+    "nl": "{0} wordt uitgevoerd…",
+    "ja": "{0}を実行中…"
+  },
+  "scripts.success": {
+    "en": "\"{0}\" completed.",
+    "it": "\"{0}\" completato.",
+    "es": "\"{0}\" completado.",
+    "fr": "\"{0}\" terminé.",
+    "de": "\"{0}\" abgeschlossen.",
+    "pt": "\"{0}\" concluído.",
+    "nl": "\"{0}\" voltooid.",
+    "ja": "「{0}」が完了しました。"
+  },
+  "scripts.failed": {
+    "en": "\"{0}\" failed.",
+    "it": "\"{0}\" non riuscito.",
+    "es": "\"{0}\" falló.",
+    "fr": "Échec de \"{0}\".",
+    "de": "\"{0}\" fehlgeschlagen.",
+    "pt": "\"{0}\" falhou.",
+    "nl": "\"{0}\" mislukt.",
+    "ja": "「{0}」が失敗しました。"
+  },
+  "scripts.start_failed": {
+    "en": "Could not start the script thread.",
+    "it": "Impossibile avviare il thread dello script.",
+    "es": "No se pudo iniciar el hilo del script.",
+    "fr": "Impossible de démarrer le thread du script.",
+    "de": "Der Skript-Thread konnte nicht gestartet werden.",
+    "pt": "Não foi possível iniciar a thread do script.",
+    "nl": "De scriptthread kon niet worden gestart.",
+    "ja": "スクリプトスレッドを開始できませんでした。"
+  },
+  "scripts.no_items": {
+    "en": "Nothing to pick",
+    "it": "Niente da selezionare",
+    "es": "Nada que elegir",
+    "fr": "Rien à choisir",
+    "de": "Nichts auszuwählen",
+    "pt": "Nada para escolher",
+    "nl": "Niets om te kiezen",
+    "ja": "選択できる項目がありません"
+  },
+  "scripts.toggle": {
+    "en": "Toggle",
+    "it": "Attiva/disattiva",
+    "es": "Alternar",
+    "fr": "Basculer",
+    "de": "Umschalten",
+    "pt": "Alternar",
+    "nl": "Wisselen",
+    "ja": "切り替え"
   }
 }
