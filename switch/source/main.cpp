@@ -29,6 +29,7 @@
 #include "backupsize.hpp"
 #include "colors.hpp"
 #include "logging.hpp"
+#include "scriptrunner.hpp"
 #include "titlecatalog.hpp"
 #include "transfer.hpp"
 #include "transferjob.hpp"
@@ -99,9 +100,10 @@ int main(void)
         padUpdate(&pad);
 
         input.kDown = padGetButtonsDown(&pad);
-        // Don't exit mid-copy: the worker is touching the save filesystem, and
-        // tearing down services under it would crash.
-        if ((input.kDown & HidNpadButton_Plus) && !TransferJob::get().active())
+        // Don't exit mid-copy (the worker is touching the save filesystem, and
+        // tearing down services under it would crash) or mid-script (picoc
+        // cannot be preempted).
+        if ((input.kDown & HidNpadButton_Plus) && !TransferJob::get().active() && !ScriptRunner::get().active())
             break;
 
         input.kHeld = padGetButtons(&pad);

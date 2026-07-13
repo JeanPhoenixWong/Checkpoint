@@ -1,6 +1,6 @@
 /*
  *   This file is part of Checkpoint
- *   Copyright (C) 2017-2025 Bernardo Giordano, FlagBrew
+ *   Copyright (C) 2017-2026 Bernardo Giordano, FlagBrew
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -24,41 +24,19 @@
  *         reasonable ways as different from the original version.
  */
 
-#ifndef KEYBOARDMANAGER_HPP
-#define KEYBOARDMANAGER_HPP
+#ifndef THREAD_HPP
+#define THREAD_HPP
 
-#include <string>
-#include <switch.h>
-#include <utility>
+#include <cstddef>
+#include <optional>
 
-class KeyboardManager {
-public:
-    static KeyboardManager& get(void)
-    {
-        static KeyboardManager mSingleton;
-        return mSingleton;
-    }
-
-    KeyboardManager(KeyboardManager const&) = delete;
-    void operator=(KeyboardManager const&)  = delete;
-
-    std::pair<bool, std::string> keyboard(const std::string& suggestion);
-
-    // Free-form text prompt for the scripting bridge: `hint` is the swkbd guide
-    // text, `maxLen` the accepted length in characters (not counting the
-    // terminator). Returns "" when cancelled or the keyboard is unavailable.
-    std::string text(const std::string& suggestion, const std::string& hint, size_t maxLen);
-
-    std::pair<bool, Result> isSystemKeyboardAvailable() { return std::make_pair(systemKeyboardAvailable, res); }
-
-    static const size_t CUSTOM_PATH_LEN = 49;
-
-private:
-    KeyboardManager(void);
-    virtual ~KeyboardManager() = default;
-
-    Result res;
-    bool systemKeyboardAvailable;
-};
+// The subset of the 3DS Threads helper that common/script/scriptrunner.cpp
+// uses: spawn a detached worker with an explicit stack size. Not a general
+// thread pool — one slot, sized for ScriptRunner's one-script-at-a-time model
+// (the next create() reaps the previous worker, which active() guarantees has
+// already finished).
+namespace Threads {
+    bool create(std::optional<size_t> stackSize, void (*entrypoint)(void));
+}
 
 #endif

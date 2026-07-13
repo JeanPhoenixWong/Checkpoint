@@ -1,6 +1,6 @@
 /*
  *   This file is part of Checkpoint
- *   Copyright (C) 2017-2025 Bernardo Giordano, FlagBrew
+ *   Copyright (C) 2017-2026 Bernardo Giordano, FlagBrew
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -24,41 +24,22 @@
  *         reasonable ways as different from the original version.
  */
 
-#ifndef KEYBOARDMANAGER_HPP
-#define KEYBOARDMANAGER_HPP
+#ifndef PATHS_HPP
+#define PATHS_HPP
 
 #include <string>
 #include <switch.h>
-#include <utility>
 
-class KeyboardManager {
-public:
-    static KeyboardManager& get(void)
-    {
-        static KeyboardManager mSingleton;
-        return mSingleton;
-    }
-
-    KeyboardManager(KeyboardManager const&) = delete;
-    void operator=(KeyboardManager const&)  = delete;
-
-    std::pair<bool, std::string> keyboard(const std::string& suggestion);
-
-    // Free-form text prompt for the scripting bridge: `hint` is the swkbd guide
-    // text, `maxLen` the accepted length in characters (not counting the
-    // terminator). Returns "" when cancelled or the keyboard is unavailable.
-    std::string text(const std::string& suggestion, const std::string& hint, size_t maxLen);
-
-    std::pair<bool, Result> isSystemKeyboardAvailable() { return std::make_pair(systemKeyboardAvailable, res); }
-
-    static const size_t CUSTOM_PATH_LEN = 49;
-
-private:
-    KeyboardManager(void);
-    virtual ~KeyboardManager() = default;
-
-    Result res;
-    bool systemKeyboardAvailable;
-};
+// Owner of the script folder layout (the backup roots stay in SaveDataSource,
+// which predates this header). Mirrors the 3DS Paths namespace so common code
+// and docs can talk about one rule.
+namespace Paths {
+    // "sdmc:/switch/Checkpoint/scripts" — the drop-in point for PicoC scripts.
+    // Its "universal" subfolder holds title-independent scripts; a subfolder
+    // named after a 16-hex-uppercase title id holds that title's own.
+    const char* scriptsRoot(void);
+    std::string universalScriptsDir(void);
+    std::string scriptsDirFor(u64 id);
+}
 
 #endif

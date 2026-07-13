@@ -37,11 +37,14 @@ APP_VERSION	:=	${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}
 TARGET			:=	$(subst $e ,_,$(notdir $(APP_TITLE)))
 OUTDIR			:=	out
 BUILD			:=	build
-FORMATSOURCES	:=	source ../common
-SOURCES			:=	$(FORMATSOURCES) source/gfx ../3rd-party/ftp
+FORMATSOURCES	:=	source ../common ../common/script
+SOURCES			:=	$(FORMATSOURCES) source/gfx source/script ../3rd-party/ftp \
+					../common/script/cstdlib \
+					../3rd-party/picoc/source/interpreter
 DATA			:=	data
-FORMATINCLUDES	:=	include ../common
-INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/ftp
+FORMATINCLUDES	:=	include ../common ../common/script
+INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/ftp \
+					../3rd-party/picoc/include
 EXEFS_SRC		:=	exefs_src
 ROMFS			:=	romfs
 SHADERS			:=	shaders
@@ -65,12 +68,16 @@ CFLAGS	:=	-g -Wall -Wextra -O3 -ffunction-sections \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -D_GNU_SOURCE=1
 
+# picoc: UNIX_HOST is the only host flavour that fits newlib (the alternative is
+# MSVC). Its platform.h comes from common/script, not the submodule.
+CFLAGS	+=	-DUNIX_HOST
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -std=gnu++23
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-no-as-needed,-Map,$(notdir $*.map)
 
-LIBS	:=	-ldeko3d `aarch64-none-elf-pkg-config freetype2 libturbojpeg --libs`
+LIBS	:=	-ldeko3d `aarch64-none-elf-pkg-config freetype2 libturbojpeg --libs` -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lnx
 
 CXX		:= `which ccache` $(CXX)
 CC		:= `which ccache` $(CC)

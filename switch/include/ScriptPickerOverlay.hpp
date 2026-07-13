@@ -1,6 +1,6 @@
 /*
  *   This file is part of Checkpoint
- *   Copyright (C) 2017-2025 Bernardo Giordano, FlagBrew
+ *   Copyright (C) 2017-2026 Bernardo Giordano, FlagBrew
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -24,41 +24,32 @@
  *         reasonable ways as different from the original version.
  */
 
-#ifndef KEYBOARDMANAGER_HPP
-#define KEYBOARDMANAGER_HPP
+#ifndef SCRIPTPICKEROVERLAY_HPP
+#define SCRIPTPICKEROVERLAY_HPP
 
+#include "Overlay.hpp"
+#include "scriptcatalog.hpp"
+#include <functional>
 #include <string>
-#include <switch.h>
-#include <utility>
+#include <vector>
 
-class KeyboardManager {
+// Modal script picker raised by the Scripts action: universal scripts first,
+// then the selected title's specific ones (tagged with `titleTag`, its display
+// name). A invokes onPick with the chosen entry after dismissing, B cancels.
+// Running the pick (confirm prompt + ScriptRunner) is the caller's business.
+class ScriptPickerOverlay : public Overlay {
 public:
-    static KeyboardManager& get(void)
-    {
-        static KeyboardManager mSingleton;
-        return mSingleton;
-    }
-
-    KeyboardManager(KeyboardManager const&) = delete;
-    void operator=(KeyboardManager const&)  = delete;
-
-    std::pair<bool, std::string> keyboard(const std::string& suggestion);
-
-    // Free-form text prompt for the scripting bridge: `hint` is the swkbd guide
-    // text, `maxLen` the accepted length in characters (not counting the
-    // terminator). Returns "" when cancelled or the keyboard is unavailable.
-    std::string text(const std::string& suggestion, const std::string& hint, size_t maxLen);
-
-    std::pair<bool, Result> isSystemKeyboardAvailable() { return std::make_pair(systemKeyboardAvailable, res); }
-
-    static const size_t CUSTOM_PATH_LEN = 49;
+    ScriptPickerOverlay(Screen& screen, std::vector<ScriptCatalog::Entry> entries, const std::string& titleTag,
+        std::function<void(const ScriptCatalog::Entry&)> onPick);
+    void draw(void) const override;
+    void update(const InputState& input) override;
 
 private:
-    KeyboardManager(void);
-    virtual ~KeyboardManager() = default;
-
-    Result res;
-    bool systemKeyboardAvailable;
+    std::vector<ScriptCatalog::Entry> mEntries;
+    std::string mTitleTag;
+    std::function<void(const ScriptCatalog::Entry&)> mOnPick;
+    int mCursor = 0;
+    int mScroll = 0;
 };
 
 #endif

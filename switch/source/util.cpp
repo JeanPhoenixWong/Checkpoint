@@ -71,6 +71,9 @@ Result servicesInit(void)
     io::createDirectory("sdmc:/switch/Checkpoint/device");
     io::createDirectory("sdmc:/switch/Checkpoint/system");
     io::createDirectory("sdmc:/switch/Checkpoint/logs");
+    // Script drop-in point, so users find it (see Paths::scriptsRoot).
+    io::createDirectory("sdmc:/switch/Checkpoint/scripts");
+    io::createDirectory("sdmc:/switch/Checkpoint/scripts/universal");
 
     // Sets the log file path and registers the /logs HTTP handlers (the shared
     // logging module registers them under the SERVER_HPP guard); then open the

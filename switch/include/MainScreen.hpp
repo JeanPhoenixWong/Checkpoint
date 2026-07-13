@@ -81,6 +81,11 @@ protected:
     // contextual (an existing backup must be selected); Receive is global.
     void startTransferSend(void);
     void startTransferReceive(void);
+    // Scans the script folders and raises the picker (Scripts action, R3).
+    void startScriptPicker(void);
+    // While a script runs: raises the overlay for a pending ScriptUiBridge
+    // request (or answers Keyboard inline via swkbd).
+    void pumpScriptRequests(void);
 
 private:
     entryType_t type;
