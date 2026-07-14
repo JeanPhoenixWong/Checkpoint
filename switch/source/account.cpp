@@ -25,6 +25,7 @@
  */
 
 #include "account.hpp"
+#include "backupsize.hpp"
 #include "gfxutils.hpp"
 #include "main.hpp"
 
@@ -122,6 +123,11 @@ Texture* Account::icon(AccountUid id)
 
 AccountUid Account::selectAccount(void)
 {
+    // Same rationale as KeyboardManager: the size-cache walk floods the FS
+    // sysmodule with IPC and delays the applet launch, so park it while the
+    // player-select applet is up.
+    BackupSizeCache::PauseGuard pauseWalk;
+
     LibAppletArgs args;
     libappletArgsCreate(&args, 0x10000);
     u8 st_in[0xA0]  = {0};
