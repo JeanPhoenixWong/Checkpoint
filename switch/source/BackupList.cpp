@@ -32,6 +32,8 @@
 #include "io.hpp"
 #include "main.hpp"
 #include "savedatasource.hpp"
+#include <algorithm>
+#include <cctype>
 #include "shapes.hpp"
 #include "titlecatalog.hpp"
 #include <algorithm>
@@ -197,11 +199,15 @@ void BackupList::rebuild(bool sizesOnly)
 namespace {
     // Account backups are named "YYYYMMDD-HHMMSS username": the timestamp is the
     // row's mono title, the trailing username (if any) becomes the right-hand
-    // user chip. Splits on the first space; no space → whole name, no chip.
+    // user chip. Custom-named backups (user typed their own name, possibly with
+    // spaces) must not be split — only a "YYYYMMDD-HHMMSS" prefix triggers it.
     void splitBackupName(const std::string& full, std::string& name, std::string& chip)
     {
         size_t sp = full.find(' ');
-        if (sp == std::string::npos) {
+        const bool timestamped = sp == 15 && full[8] == '-' &&
+            std::all_of(full.begin(), full.begin() + 8, [](unsigned char c) { return std::isdigit(c); }) &&
+            std::all_of(full.begin() + 9, full.begin() + 15, [](unsigned char c) { return std::isdigit(c); });
+        if (!timestamped) {
             name = full;
             chip.clear();
         }
