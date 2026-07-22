@@ -1,0 +1,26 @@
+name: Build Switch NRO
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: devkitpro/devkita64:latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build Switch version
+        run: |
+          cd switch
+          make -j$(nproc)
+
+      - name: Upload NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Checkpoint-NRO
+          path: switch/*.nro
