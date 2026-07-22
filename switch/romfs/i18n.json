@@ -525,7 +525,7 @@
     "pt": "Escolha um título e depois uma pasta extra para seus saves",
     "nl": "Kies een titel en daarna een extra map voor de saves",
     "ja": "タイトルを選び、セーブ用の追加フォルダを選択",
-    "zh": "选择一款游戏，然后添加一个包含其存档的目录（从其他路径中读取该游戏的其余存档）"
+    "zh": "为所选游戏添加一个额外的存档读取目录（该目录中的存档也会被Checkpoint读取并显示）"
   },
   "settings.folders.add_device": {
     "en": "Add a device save folder",
