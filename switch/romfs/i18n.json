@@ -360,7 +360,7 @@
     "pt": "Servidor FTP",
     "nl": "FTP-server",
     "ja": "FTPサーバー",
-    "zh": "FTP服务器"
+    "zh": "FTP 服务器"
   },
   "settings.conn.ftp.sub": {
     "en": "Browse backups from a computer",
@@ -1273,7 +1273,7 @@
     "pt": "Pressione A (OK) para atualizar agora",
     "nl": "Druk op A (OK) om nu te vernieuwen",
     "ja": "Aボタンで今すぐ更新",
-    "zh": "按 A（确定）立即刷新"
+    "zh": "按 A 键立即刷新"
   },
   "transfer.receiver_stopped": {
     "en": "Receiver stopped",
