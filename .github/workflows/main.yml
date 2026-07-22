@@ -28,9 +28,10 @@ jobs:
           find . -maxdepth 2 -type d | sort
 
       - name: Build Switch version
+        shell: bash
         working-directory: switch
         run: |
-          set -euxo pipefail
+          set -eux
           make -j1 V=1
 
       - name: List build outputs
