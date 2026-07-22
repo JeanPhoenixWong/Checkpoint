@@ -12,15 +12,35 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Show environment
+        run: |
+          echo "Current directory:"
+          pwd
+          echo
+          echo "Repository files:"
+          ls -la
+          echo
+          echo "Top-level directories:"
+          find . -maxdepth 2 -type d | sort
 
       - name: Build Switch version
+        working-directory: switch
         run: |
-          cd switch
-          make -j$(nproc)
+          set -euxo pipefail
+          make -j1 V=1
+
+      - name: List build outputs
+        run: |
+          find switch -name "*.nro" -o -name "*.elf" | sort
 
       - name: Upload NRO
         uses: actions/upload-artifact@v4
         with:
           name: Checkpoint-NRO
-          path: switch/*.nro
+          path: |
+            switch/*.nro
+            switch/**/*.nro
