@@ -96,6 +96,9 @@ Result servicesInit(void)
     mkdir((ckpt + "/saves").c_str(), 777);
     mkdir((ckpt + "/extdata").c_str(), 777);
     mkdir((ckpt + "/logs").c_str(), 777);
+    // Script drop-in point, so users find where universal scripts go.
+    mkdir((std::string("sdmc:") + Paths::scriptsRoot()).c_str(), 777);
+    mkdir(("sdmc:" + Paths::universalScriptsDir()).c_str(), 777);
 
     Logging::initFileLogging();
 

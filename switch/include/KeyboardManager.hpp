@@ -44,6 +44,15 @@ public:
 
     std::pair<bool, std::string> keyboard(const std::string& suggestion);
 
+    // Free-form text prompt for the scripting bridge: `hint` is the swkbd guide
+    // text, `maxLen` the accepted length in characters (not counting the
+    // terminator). Returns "" when cancelled or the keyboard is unavailable.
+    std::string text(const std::string& suggestion, const std::string& hint, size_t maxLen);
+    // Numeric keypad constrained to [min, max] (a text-check callback rejects
+    // out-of-range input). Returns the entered value, or -1 on cancel / when the
+    // keyboard is unavailable.
+    int numpad(const std::string& hint, int min, int max);
+
     std::pair<bool, Result> isSystemKeyboardAvailable() { return std::make_pair(systemKeyboardAvailable, res); }
 
     static const size_t CUSTOM_PATH_LEN = 49;

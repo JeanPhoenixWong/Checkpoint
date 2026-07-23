@@ -26,15 +26,21 @@
 
 #include "MainScreen.hpp"
 #include "KeyboardManager.hpp"
+#include "MenuOverlay.hpp"
 #include "ReceiveOverlay.hpp"
+#include "ScriptPickerOverlay.hpp"
+#include "ScriptRequestOverlays.hpp"
 #include "SettingsScreen.hpp"
 #include "backupsize.hpp"
 #include "configuration.hpp"
 #include "gfxutils.hpp"
 #include "i18n.hpp"
 #include "main.hpp"
+#include "paths.hpp"
 #include "savedatasource.hpp"
 #include "savekind.hpp"
+#include "scriptcatalog.hpp"
+#include "scriptrunner.hpp"
 #include "shapes.hpp"
 #include "titlecatalog.hpp"
 #include "transfer.hpp"
@@ -56,6 +62,7 @@ namespace {
     constexpr int RAIL_ITEM_Y0    = 72;
     constexpr int RAIL_ITEM_PITCH = 66;
     constexpr int SETTINGS_BTN_Y  = 544;
+    constexpr int SCRIPT_BTN_Y    = SETTINGS_BTN_Y - RAIL_ITEM_PITCH;
     constexpr int AVATAR_SIZE     = 44;
     constexpr int AVATAR_X        = 18;
     constexpr int AVATAR_Y        = 610;
@@ -222,9 +229,10 @@ MainScreen::MainScreen(const InputState&)
     backupList    = std::make_unique<BackupList>(COL_X, LIST_Y, COL_W, LIST_ROWS * BackupList::ROW_PITCH, LIST_ROWS);
     buttonBackup  = std::make_unique<Clickable>(COL_X, BTN_BACKUP_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("main.backup"), true);
     buttonRestore = std::make_unique<Clickable>(COL_X, BTN_RESTORE_Y, BTN_W, BTN_H, COLOR_SURFACE, COLOR_TEXT, i18n::t("main.restore"), true);
-    // Send is a full-width button stacked above Backup (Receive now lives inside
-    // the backup list, mirroring the 3DS layout). Contextual: only shown when an
-    // existing backup is highlighted.
+    // Contextual slot stacked above Backup (Receive lives inside the backup
+    // list, mirroring the 3DS layout): Send when an existing backup is
+    // highlighted, Scripts otherwise. The Clickable only hit-tests touches;
+    // the label drawn comes from drawActionButton.
     buttonSend = std::make_unique<Clickable>(COL_X, BTN_TRANSFER_Y, BTN_W, BTN_H, COLOR_ACCENT, COLOR_WHITE, i18n::t("transfer.send"), true);
 
     // The rail Clickables exist only so released() can hit-test touches; the
@@ -233,6 +241,7 @@ MainScreen::MainScreen(const InputState&)
         int y            = RAIL_ITEM_Y0 + RAIL_ITEM_PITCH * k;
         filterButtons[k] = std::make_unique<Clickable>(RAIL_ITEM_X, y, RAIL_ITEM, RAIL_ITEM, COLOR_FILL1, COLOR_TEXT2, "", true);
     }
+    scriptButton   = std::make_unique<Clickable>(RAIL_ITEM_X, SCRIPT_BTN_Y, RAIL_ITEM, RAIL_ITEM, COLOR_FILL1, COLOR_TEXT2, "", true);
     settingsButton = std::make_unique<Clickable>(RAIL_ITEM_X, SETTINGS_BTN_Y, RAIL_ITEM, RAIL_ITEM, COLOR_FILL1, COLOR_TEXT2, "", true);
     avatarButton   = std::make_unique<Clickable>(AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE, COLOR_TILE, COLOR_TEXT2, "", true);
 }
@@ -377,11 +386,19 @@ void MainScreen::draw() const
     for (int k = 0; k < 4; k++) {
         drawRailItem(RAIL_ITEM_Y0 + RAIL_ITEM_PITCH * k, SaveKind::all()[k], mSaveTypeFilter == static_cast<saveTypeFilter_t>(k));
     }
-    // Sidebar cursor spans the 4 save-kind buttons plus the settings gear
-    // (index 4), so it can be reached by pressing Down past SYSTEM.
+    // Sidebar cursor spans the 4 save-kind buttons plus the scripts glyph
+    // (index 4) and settings gear (index 5), so both can be reached by pressing
+    // Down past SYSTEM.
     if (sidebarFocused) {
-        const int selY = sidebarCursor < 4 ? RAIL_ITEM_Y0 + RAIL_ITEM_PITCH * sidebarCursor : SETTINGS_BTN_Y;
+        const int selY = sidebarCursor < 4 ? RAIL_ITEM_Y0 + RAIL_ITEM_PITCH * sidebarCursor : (sidebarCursor == 4 ? SCRIPT_BTN_Y : SETTINGS_BTN_Y);
         Shapes::focusRing(RAIL_ITEM_X, selY, RAIL_ITEM, RAIL_ITEM, 14, COLOR_ACCENT);
+    }
+
+    Shapes::fillRound(RAIL_ITEM_X, SCRIPT_BTN_Y, RAIL_ITEM, RAIL_ITEM, 0, COLOR_FILL1);
+    {
+        u32 sw, sh;
+        Gfx::GetTextDimensions(22, "", &sw, &sh);
+        Gfx::DrawText(22, RAIL_ITEM_X + (RAIL_ITEM - (int)sw) / 2, SCRIPT_BTN_Y + (RAIL_ITEM - (int)sh) / 2 + 3, COLOR_TEXT2, "");
     }
 
     Shapes::fillRound(RAIL_ITEM_X, SETTINGS_BTN_Y, RAIL_ITEM, RAIL_ITEM, 0, COLOR_FILL1);
@@ -507,14 +524,12 @@ void MainScreen::draw() const
             drawActionButton(COL_X, BTN_BACKUP_Y, lbl, "L", true);
         }
         else {
-            // Send sits above Backup/Restore, bound to ZR. Always shown in its
-            // slot, but greyed (disabled) unless a highlighted existing backup can
-            // be sent — i.e. it stays inactive while the "New..." or "Receive" rows
-            // are hovered.
-            if (Configuration::getInstance().isTransferEnabled()) {
-                const bool sendCtx = backupScrollEnabled && backupList->index() != 0 && !backupList->isReceiveRow(backupList->index());
-                drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "ZR", sendCtx, BTN_W, sendCtx);
-            }
+            // The slot above Backup/Restore is always Send on ZR (greyed until a
+            // highlighted existing backup can actually be sent) so it never swaps
+            // identity; Scripts now lives in the Minus menu.
+            const bool sendCtx = Configuration::getInstance().isTransferEnabled() && backupScrollEnabled && backupList->index() != 0 &&
+                                 !backupList->isReceiveRow(backupList->index());
+            drawActionButton(COL_X, BTN_TRANSFER_Y, i18n::t("transfer.send"), "ZR", true, BTN_W, sendCtx);
             drawActionButton(COL_X, BTN_BACKUP_Y, i18n::t("main.backup"), "L", true);
             drawActionButton(COL_X, BTN_RESTORE_Y, i18n::t("main.restore"), "R", false);
         }
@@ -527,14 +542,44 @@ void MainScreen::draw() const
     }
 
     // ---- Hint bar ----
-    // Minus opens Settings (see the class note); no help overlay in this build.
+    // Minus opens the tools menu (see the class note); no help overlay in this build.
     UiKit::drawHintBar({
         {"A", i18n::t("hint.select")},
         {"B", i18n::t("hint.back")},
         {"X", i18n::t("hint.sort")},
         {"Y", i18n::t("hint.multiselect")},
-        {"-", i18n::t("hint.settings")},
+        {"-", i18n::t("hint.menu")},
     });
+
+    // ---- Script status ----
+    // While a script runs, a small modal shows its name and last gui_status
+    // line; the script's own requests raise full overlays on top of this.
+    if (ScriptRunner::get().active()) {
+        Gfx::DrawRect(0, 0, 1280, 720, COLOR_SCRIM);
+
+        const int mw = 540, mh = 160;
+        const int mx = (1280 - mw) / 2, my = (720 - mh) / 2;
+        Shapes::cardRound(mx, my, mw, mh, 0, COLOR_SURFACE, COLOR_STROKE2, 1);
+
+        std::string titleStr = i18n::t("scripts.running", {ScriptRunner::get().scriptName()});
+        u32 tw, th;
+        Gfx::GetTextDimensions(20, titleStr.c_str(), &tw, &th);
+        Gfx::DrawText(20, mx + (mw - (int)tw) / 2, my + 36, COLOR_TEXT, titleStr.c_str());
+
+        std::string status = ScriptRunner::get().bridge().statusText();
+        if (!status.empty()) {
+            status = trimToFit(status, mw - 48, 15);
+            u32 sw;
+            Gfx::GetTextDimensions(15, status.c_str(), &sw, NULL);
+            Gfx::DrawText(15, mx + (mw - (int)sw) / 2, my + 36 + (int)th + 18, COLOR_TEXT2, status.c_str());
+        }
+
+        // Hold-B abort hint (same wording as the transfer modal).
+        std::string hint = ScriptRunner::get().cancelRequested() ? i18n::t("transfer.cancelling") : i18n::t("transfer.cancel_hint");
+        u32 hw;
+        Gfx::GetTextDimensions(15, hint.c_str(), &hw, NULL);
+        Gfx::DrawText(15, mx + (mw - (int)hw) / 2, my + mh - 34, COLOR_TEXT2, hint.c_str());
+    }
 
     // ---- Transfer modal ----
     const TransferSnapshot transfer = TransferStatus::snapshot();
@@ -714,8 +759,133 @@ void MainScreen::update(const InputState& input)
         return;
     }
 
+    // Script outcome / activity. While a script runs this screen only pumps its
+    // UI-bridge requests; normal input is ignored (same policy as TransferJob).
+    if (auto script = ScriptRunner::get().takeResult()) {
+        appletEndBlockingHomeButton();
+        if (script->cancelled) {
+            // User-requested abort: neutral info, not an error.
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("scripts.aborted", {script->scriptName}));
+        }
+        else if (script->exitValue == 0) {
+            currentOverlay = std::make_shared<InfoOverlay>(*this, i18n::t("scripts.success", {script->scriptName}));
+        }
+        else {
+            // The output tail carries picoc's diagnostic; the card fits a few lines.
+            std::string detail = script->output.size() > 120 ? script->output.substr(script->output.size() - 120) : script->output;
+            currentOverlay     = std::make_shared<ErrorOverlay>(
+                *this, script->exitValue, i18n::t("scripts.failed", {script->scriptName}) + (detail.empty() ? "" : "\n" + detail));
+        }
+        return;
+    }
+    if (ScriptRunner::get().active()) {
+        // The hold-B kill switch lives in main.cpp (it must keep counting
+        // while a script-raised overlay replaces this update); here we only
+        // pump the bridge.
+        pumpScriptRequests();
+        return;
+    }
+
     updateSelector(input);
     handleEvents(input);
+}
+
+void MainScreen::startScriptPicker(void)
+{
+    if (TransferJob::get().active() || ScriptRunner::get().active()) {
+        return;
+    }
+
+    // The highlighted grid title (if any) picks the specific-script folder and
+    // becomes the script's selected title.
+    Title title;
+    const bool hasTitle = TitleCatalog::get().getFilteredTitleCount(g_currentUId, mSaveTypeFilter) > 0;
+    if (hasTitle) {
+        TitleCatalog::get().getFilteredTitle(title, g_currentUId, mSaveTypeFilter, mCursor);
+    }
+    const u64 titleId = hasTitle ? title.id() : 0;
+
+    // Bundled (romfs) scripts first, then SD: an SD file of the same name wins.
+    std::vector<ScriptCatalog::Root> universalRoots = {
+        {Paths::bundledUniversalScriptsDir(), ScriptCatalog::Source::Bundled},
+        {Paths::universalScriptsDir(), ScriptCatalog::Source::Sd},
+    };
+    std::vector<ScriptCatalog::Root> specificRoots;
+    if (hasTitle) {
+        specificRoots = {
+            {Paths::bundledScriptsDirFor(titleId), ScriptCatalog::Source::Bundled},
+            {Paths::scriptsDirFor(titleId), ScriptCatalog::Source::Sd},
+        };
+    }
+    auto entries   = ScriptCatalog::scan(universalRoots, specificRoots);
+    currentOverlay = std::make_shared<ScriptPickerOverlay>(
+        *this, std::move(entries), hasTitle ? title.displayName() : "", [this, hasTitle, titleId](const ScriptCatalog::Entry& entry) {
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, i18n::t("scripts.confirm_run", {entry.name}),
+                [this, entry, hasTitle, titleId]() {
+                    this->removeOverlay();
+                    std::string idHex = hasTitle ? StringUtils::format("%016llX", (unsigned long long)titleId) : "";
+                    // HOME stays blocked for the whole run (PKSM precedent): picoc
+                    // cannot be preempted, so a buggy script requires a reboot.
+                    appletBeginBlockingHomeButton(0);
+                    if (!ScriptRunner::get().start(entry.path, entry.name, std::move(idHex))) {
+                        appletEndBlockingHomeButton();
+                        currentOverlay = std::make_shared<ErrorOverlay>(*this, -1, i18n::t("scripts.start_failed"));
+                    }
+                },
+                [this]() { this->removeOverlay(); });
+        });
+}
+
+void MainScreen::pumpScriptRequests(void)
+{
+    ScriptUiBridge& bridge = ScriptRunner::get().bridge();
+    const UiRequest* req   = bridge.pending();
+    if (!req) {
+        return;
+    }
+
+    // This runs only while no overlay is up (an overlay's update replaces the
+    // screen's), so each pending request is mapped to its overlay exactly once;
+    // the overlay answers the bridge before dismissing itself.
+    switch (req->kind) {
+        case UiRequest::Kind::Message:
+            currentOverlay = std::make_shared<ScriptMessageOverlay>(*this, req->prompt);
+            break;
+        case UiRequest::Kind::Confirm:
+            currentOverlay = std::make_shared<YesNoOverlay>(
+                *this, req->prompt,
+                [this]() {
+                    UiResponse resp;
+                    resp.confirmed = true;
+                    ScriptRunner::get().bridge().respond(std::move(resp));
+                    this->removeOverlay();
+                },
+                [this]() {
+                    ScriptRunner::get().bridge().respond(UiResponse{});
+                    this->removeOverlay();
+                });
+            break;
+        case UiRequest::Kind::PickOne:
+            currentOverlay = std::make_shared<ScriptPickOneOverlay>(*this, req->prompt, req->items);
+            break;
+        case UiRequest::Kind::PickMany:
+            currentOverlay = std::make_shared<ScriptPickManyOverlay>(*this, req->prompt, req->items, req->preselected);
+            break;
+        case UiRequest::Kind::Keyboard: {
+            // swkbd runs on the main thread - the reason the bridge exists.
+            UiResponse resp;
+            resp.text = KeyboardManager::get().text("", req->prompt, req->maxChars > 0 ? (size_t)req->maxChars - 1 : 0);
+            bridge.respond(std::move(resp));
+            break;
+        }
+        case UiRequest::Kind::Numpad: {
+            UiResponse resp;
+            resp.index = KeyboardManager::get().numpad(req->prompt, req->numMin, req->numMax);
+            bridge.respond(std::move(resp));
+            break;
+        }
+    }
 }
 
 void MainScreen::updateSelector(const InputState& input)
@@ -851,26 +1021,49 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
 
-    // Minus (or the rail gear) opens Settings. Guarded so you can't navigate
-    // away mid-copy; the swap itself is deferred to main() via g_pendingScreen.
-    if (((kdown & HidNpadButton_Minus) || settingsButton->released()) && !TransferJob::get().active()) {
+    // Minus opens the tools menu (Scripts / Settings). Guarded so you can't
+    // navigate away mid-copy.
+    if ((kdown & HidNpadButton_Minus) && !TransferJob::get().active()) {
+        std::vector<MenuOverlay::Item> items = {
+            {i18n::t("main.scripts"), [this]() { startScriptPicker(); }},
+            {i18n::t("settings.title"), []() { g_pendingScreen = std::make_shared<SettingsScreen>(g_screen); }},
+        };
+        currentOverlay = std::make_shared<MenuOverlay>(*this, i18n::t("menu.title"), std::move(items));
+        return;
+    }
+
+    // The rail scripts glyph opens the picker straight away, mirroring the gear.
+    if (scriptButton->released() && !TransferJob::get().active()) {
+        startScriptPicker();
+        return;
+    }
+
+    // The rail gear is an unambiguous Settings icon, so it still jumps straight
+    // there; the swap itself is deferred to main() via g_pendingScreen.
+    if (settingsButton->released() && !TransferJob::get().active()) {
         g_pendingScreen = std::make_shared<SettingsScreen>(g_screen);
         return;
     }
 
     // handle sidebar D-pad navigation. Cursor 0..3 = save-kind buttons, 4 =
-    // settings gear (so Down from SYSTEM reaches it, Up from USER wraps to it).
+    // scripts glyph, 5 = settings gear (so Down from SYSTEM reaches them, Up from
+    // USER wraps to the gear).
     if (sidebarFocused) {
         if (kdown & HidNpadButton_Up) {
-            sidebarCursor = sidebarCursor > 0 ? sidebarCursor - 1 : 4;
+            sidebarCursor = sidebarCursor > 0 ? sidebarCursor - 1 : 5;
         }
         else if (kdown & HidNpadButton_Down) {
-            sidebarCursor = sidebarCursor < 4 ? sidebarCursor + 1 : 0;
+            sidebarCursor = sidebarCursor < 5 ? sidebarCursor + 1 : 0;
         }
         if (kdown & HidNpadButton_A) {
-            if (sidebarCursor == 4) {
+            if (sidebarCursor == 5) {
                 if (!TransferJob::get().active()) {
                     g_pendingScreen = std::make_shared<SettingsScreen>(g_screen);
+                }
+            }
+            else if (sidebarCursor == 4) {
+                if (!TransferJob::get().active()) {
+                    startScriptPicker();
                 }
             }
             else {
@@ -890,10 +1083,9 @@ void MainScreen::handleEvents(const InputState& input)
     // list: switching users there would leave the open list pointing at a title of
     // the previous account (same as the avatar button, which is title-grid only).
     if (mSaveTypeFilter == FILTER_SAVES && !backupScrollEnabled) {
-        // ZR is the Send button when wireless transfer is on, so the account
-        // picker keeps ZL alone there.
-        const u64 accountKeys = Configuration::getInstance().isTransferEnabled() ? HidNpadButton_ZL : (HidNpadButton_ZL | HidNpadButton_ZR);
-        if (kdown & accountKeys) {
+        // ZR is the contextual Send/Scripts button, so the account picker
+        // lives on ZL alone.
+        if (kdown & HidNpadButton_ZL) {
             while ((g_currentUId = Account::selectAccount()) == 0)
                 ;
             this->index(TITLES, 0);
@@ -1056,16 +1248,16 @@ void MainScreen::handleEvents(const InputState& input)
         }
     }
 
-    // Wireless Send, on ZR or its touch button (gated behind the setting). Receive
-    // is now a row inside the backup list (handled by the A/touch path above). Send
-    // fires only when an existing backup is highlighted, so the "select a backup
-    // first" info box never appears.
-    if (Configuration::getInstance().isTransferEnabled()) {
-        const size_t row = this->index(CELLS);
-        if (backupScrollEnabled && row != 0 && !backupList->isReceiveRow(row) && (buttonSend->released() || (kdown & HidNpadButton_ZR))) {
-            startTransferSend();
-            return;
-        }
+    // ZR / its touch button is contextual (3DS parity): wireless Send when an
+    // existing backup is highlighted (and transfer is on) — so the "select a
+    // backup first" info box never appears — the script picker otherwise.
+    // Receive is a row inside the backup list (handled by the A/touch path
+    // above).
+    if (!MS::multipleSelectionEnabled() && (buttonSend->released() || (kdown & HidNpadButton_ZR))) {
+        // startTransferSend self-guards: it no-ops unless a highlighted existing
+        // backup is sendable, matching the greyed-out ZR button.
+        startTransferSend();
+        return;
     }
 }
 

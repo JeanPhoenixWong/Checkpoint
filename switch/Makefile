@@ -37,11 +37,14 @@ APP_VERSION	:=	${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}
 TARGET			:=	$(subst $e ,_,$(notdir $(APP_TITLE)))
 OUTDIR			:=	out
 BUILD			:=	build
-FORMATSOURCES	:=	source ../common
-SOURCES			:=	$(FORMATSOURCES) source/gfx ../3rd-party/ftp
+FORMATSOURCES	:=	source ../common ../common/script
+SOURCES			:=	$(FORMATSOURCES) source/gfx source/script ../3rd-party/ftp \
+					../common/script/cstdlib \
+					../3rd-party/picoc/source/interpreter
 DATA			:=	data
-FORMATINCLUDES	:=	include ../common
-INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/ftp
+FORMATINCLUDES	:=	include ../common ../common/script
+INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/ftp \
+					../3rd-party/picoc/include
 EXEFS_SRC		:=	exefs_src
 ROMFS			:=	romfs
 SHADERS			:=	shaders
@@ -65,12 +68,24 @@ CFLAGS	:=	-g -Wall -Wextra -O3 -ffunction-sections \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ -D_GNU_SOURCE=1
 
+# picoc: UNIX_HOST is the only host flavour that fits newlib (the alternative is
+# MSVC). Its platform.h comes from common/script, not the submodule.
+# DEBUGGER doesn't pull in the interactive debugger (debug.c is filtered out of
+# CFILES below): it makes ParseStatement call DebugCheckStatement, which
+# ../common/script/scriptabort.c implements as the script-abort kill switch.
+CFLAGS	+=	-DUNIX_HOST -DDEBUGGER
+# picoc's C frames carry no unwind info by default, so a C++ exception thrown in
+# a script binding (e.g. std::bad_alloc parsing a large web response) cannot
+# unwind back through them and std::terminate()s the process. Emit unwind tables
+# so such a throw reaches the catch in ScriptEngine::run instead of aborting.
+CFLAGS	+=	-funwind-tables
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -std=gnu++23
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-no-as-needed,-Map,$(notdir $*.map)
 
-LIBS	:=	-ldeko3d `aarch64-none-elf-pkg-config freetype2 libturbojpeg --libs`
+LIBS	:=	-ldeko3d `aarch64-none-elf-pkg-config freetype2 libturbojpeg --libs` -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lnx
 
 CXX		:= `which ccache` $(CXX)
 CC		:= `which ccache` $(CC)
@@ -98,6 +113,9 @@ export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+# picoc's interactive debugger stays out of the build; its Debug* entry points
+# come from ../common/script/scriptabort.c (the script-abort hook) instead.
+CFILES		:=	$(filter-out debug.c,$(CFILES))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))

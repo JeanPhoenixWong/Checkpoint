@@ -923,17 +923,6 @@
     "ja": "リストア",
     "zh": "恢复"
   },
-  "main.coins": {
-    "en": "Coins",
-    "it": "Monete",
-    "es": "Monedas",
-    "fr": "Pièces",
-    "de": "Münzen",
-    "pt": "Moedas",
-    "nl": "Munten",
-    "ja": "コイン",
-    "zh": "游戏币"
-  },
   "main.backup_selected": {
     "en": "Backup selected",
     "it": "Backup selez.",
@@ -1230,17 +1219,6 @@
     "nl": "Kon ontvanger niet starten.",
     "ja": "受信の開始に失敗しました。",
     "zh": "无法启动接收端"
-  },
-  "main.coins_failed": {
-    "en": "Failed to set play coins.",
-    "it": "Impossibile impostare le Play Coin.",
-    "es": "No se pudieron establecer las Play Coins.",
-    "fr": "Impossible de définir les Play Coins.",
-    "de": "Play Coins konnten nicht festgelegt werden.",
-    "pt": "Falha ao definir as moedas de jogo.",
-    "nl": "Kon speelmunten niet instellen.",
-    "ja": "プレイコインの設定に失敗しました。",
-    "zh": "设置游戏币失败"
   },
   "main.no_titles": {
     "en": "No titles available.",
@@ -1582,5 +1560,159 @@
     "nl": "Cartridge",
     "ja": "カートリッジ",
     "zh": "卡带"
+  },
+  "main.scripts": {
+    "en": "Scripts",
+    "it": "Script",
+    "es": "Scripts",
+    "fr": "Scripts",
+    "de": "Skripte",
+    "pt": "Scripts",
+    "nl": "Scripts",
+    "ja": "スクリプト",
+    "zh": "脚本"
+  },
+  "menu.title": {
+    "en": "Menu",
+    "it": "Menu",
+    "es": "Menú",
+    "fr": "Menu",
+    "de": "Menü",
+    "pt": "Menu",
+    "nl": "Menu",
+    "ja": "メニュー",
+    "zh": "菜单"
+  },
+  "scripts.pick_prompt": {
+    "en": "Run a script",
+    "it": "Esegui uno script",
+    "es": "Ejecutar un script",
+    "fr": "Exécuter un script",
+    "de": "Skript ausführen",
+    "pt": "Executar um script",
+    "nl": "Een script uitvoeren",
+    "ja": "スクリプトを実行",
+    "zh": "运行一个脚本"
+  },
+  "scripts.empty": {
+    "en": "No scripts found in /3ds/Checkpoint/scripts",
+    "it": "Nessuno script trovato in /3ds/Checkpoint/scripts",
+    "es": "No se encontraron scripts en /3ds/Checkpoint/scripts",
+    "fr": "Aucun script trouvé dans /3ds/Checkpoint/scripts",
+    "de": "Keine Skripte in /3ds/Checkpoint/scripts gefunden",
+    "pt": "Nenhum script encontrado em /3ds/Checkpoint/scripts",
+    "nl": "Geen scripts gevonden in /3ds/Checkpoint/scripts",
+    "ja": "/3ds/Checkpoint/scripts にスクリプトがありません",
+    "zh": "在 /3ds/Checkpoint/scripts 目录下没有找到脚本"
+  },
+  "scripts.universal_tag": {
+    "en": "universal",
+    "it": "universale",
+    "es": "universal",
+    "fr": "universel",
+    "de": "universell",
+    "pt": "universal",
+    "nl": "universeel",
+    "ja": "共通",
+    "zh": "通用"
+  },
+  "scripts.overridden_tag": {
+    "en": "override",
+    "it": "sostituito",
+    "es": "sobrescrito",
+    "fr": "remplacé",
+    "de": "ersetzt",
+    "pt": "substituído",
+    "nl": "vervangen",
+    "ja": "上書き",
+    "zh": "覆盖"
+  },
+  "scripts.confirm_run": {
+    "en": "Run \"{0}\"?\nScripts can modify saves and SD card contents.",
+    "it": "Eseguire \"{0}\"?\nGli script possono modificare salvataggi e contenuti della scheda SD.",
+    "es": "¿Ejecutar \"{0}\"?\nLos scripts pueden modificar guardados y el contenido de la tarjeta SD.",
+    "fr": "Exécuter \"{0}\" ?\nLes scripts peuvent modifier les sauvegardes et le contenu de la carte SD.",
+    "de": "\"{0}\" ausführen?\nSkripte können Speicherstände und SD-Karten-Inhalte verändern.",
+    "pt": "Executar \"{0}\"?\nScripts podem modificar saves e o conteúdo do cartão SD.",
+    "nl": "\"{0}\" uitvoeren?\nScripts kunnen saves en de inhoud van de SD-kaart wijzigen.",
+    "ja": "\"{0}\"を実行しますか？\nスクリプトはセーブデータやSDカードの内容を変更できます。",
+    "zh": "要运行\"{0}\"吗？\n脚本可能会修改存档和SD卡中的内容"
+  },
+  "scripts.running": {
+    "en": "Running {0}…",
+    "it": "Esecuzione di {0}…",
+    "es": "Ejecutando {0}…",
+    "fr": "Exécution de {0}…",
+    "de": "{0} läuft…",
+    "pt": "Executando {0}…",
+    "nl": "{0} wordt uitgevoerd…",
+    "ja": "{0}を実行中…",
+    "zh": "{0}运行中"
+  },
+  "scripts.success": {
+    "en": "\"{0}\" completed.",
+    "it": "\"{0}\" completato.",
+    "es": "\"{0}\" completado.",
+    "fr": "\"{0}\" terminé.",
+    "de": "\"{0}\" abgeschlossen.",
+    "pt": "\"{0}\" concluído.",
+    "nl": "\"{0}\" voltooid.",
+    "ja": "「{0}」が完了しました。",
+    "zh": "\"{0}\"执行完成"
+  },
+  "scripts.failed": {
+    "en": "\"{0}\" failed.",
+    "it": "\"{0}\" non riuscito.",
+    "es": "\"{0}\" falló.",
+    "fr": "Échec de \"{0}\".",
+    "de": "\"{0}\" fehlgeschlagen.",
+    "pt": "\"{0}\" falhou.",
+    "nl": "\"{0}\" mislukt.",
+    "ja": "「{0}」が失敗しました。",
+    "zh": ""\"{0}\"执行失败"
+  },
+  "scripts.aborted": {
+    "en": "\"{0}\" aborted.",
+    "it": "\"{0}\" interrotto.",
+    "es": "\"{0}\" cancelado.",
+    "fr": "\"{0}\" annulé.",
+    "de": "\"{0}\" abgebrochen.",
+    "pt": "\"{0}\" cancelado.",
+    "nl": "\"{0}\" afgebroken.",
+    "ja": "「{0}」を中止しました。",
+    "zh": ""\"{0}\"执行已中止"
+  },
+  "scripts.start_failed": {
+    "en": "Could not start the script thread.",
+    "it": "Impossibile avviare il thread dello script.",
+    "es": "No se pudo iniciar el hilo del script.",
+    "fr": "Impossible de démarrer le thread du script.",
+    "de": "Der Skript-Thread konnte nicht gestartet werden.",
+    "pt": "Não foi possível iniciar a thread do script.",
+    "nl": "De scriptthread kon niet worden gestart.",
+    "ja": "スクリプトスレッドを開始できませんでした。",
+    "zh": "脚本线程启动失败"
+  },
+  "scripts.no_items": {
+    "en": "Nothing to pick",
+    "it": "Niente da selezionare",
+    "es": "Nada que elegir",
+    "fr": "Rien à choisir",
+    "de": "Nichts auszuwählen",
+    "pt": "Nada para escolher",
+    "nl": "Niets om te kiezen",
+    "ja": "選択できる項目がありません",
+    "zh": "没有可选择的项目"
+  },
+  "scripts.toggle": {
+    "en": "Toggle",
+    "it": "Attiva/disattiva",
+    "es": "Alternar",
+    "fr": "Basculer",
+    "de": "Umschalten",
+    "pt": "Alternar",
+    "nl": "Wisselen",
+    "ja": "切り替え",
+    "zh": "切换"
   }
 }

@@ -81,6 +81,11 @@ protected:
     // contextual (an existing backup must be selected); Receive is global.
     void startTransferSend(void);
     void startTransferReceive(void);
+    // Scans the script folders and raises the picker (Scripts action, R3).
+    void startScriptPicker(void);
+    // While a script runs: raises the overlay for a pending ScriptUiBridge
+    // request (or answers Keyboard inline via swkbd).
+    void pumpScriptRequests(void);
 
 private:
     entryType_t type;
@@ -111,6 +116,9 @@ private:
     // Clickables purely for their stateful touch-release hit-testing; the rail
     // look is drawn by hand, not through Clickable::draw.
     std::array<std::unique_ptr<Clickable>, 4> filterButtons;
+    // Rail scripts button, touch shortcut to the script picker; stacked directly
+    // above the gear.
+    std::unique_ptr<Clickable> scriptButton;
     // Rail gear button, touch shortcut to Settings; also opened by Minus.
     std::unique_ptr<Clickable> settingsButton;
     // Account avatar, touch shortcut to the account picker. Release-triggered so

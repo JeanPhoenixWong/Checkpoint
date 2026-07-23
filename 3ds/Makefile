@@ -38,11 +38,14 @@ APP_AUTHOR		:=	Bernardo Giordano, FlagBrew
 TARGET			:=	$(subst $e ,_,$(notdir $(APP_TITLE)))
 OUTDIR			:=	out
 BUILD			:=	build
-FORMATSOURCES	:=	source ../common
-SOURCES			:=	$(FORMATSOURCES) ../3rd-party/sha256 ../3rd-party/ftp
+FORMATSOURCES	:=	source ../common ../common/script
+SOURCES			:=	$(FORMATSOURCES) source/script ../3rd-party/sha256 ../3rd-party/ftp \
+					../common/script/cstdlib \
+					../3rd-party/picoc/source/interpreter
 DATA			:=	data
-FORMATINCLUDES	:=	include ../common
-INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256 ../3rd-party/ftp
+FORMATINCLUDES	:=	include ../common ../common/script
+INCLUDES		:=	$(FORMATINCLUDES) ../3rd-party/json ../3rd-party/sha256 ../3rd-party/ftp \
+					../3rd-party/picoc/include
 GRAPHICS		:=	assets/gfx
 ROMFS			:=	assets/romfs
 GFXBUILD		:=	$(ROMFS)/gfx
@@ -86,12 +89,24 @@ CFLAGS	:=	-g -gdwarf-4 -Wall -Wextra -Wno-psabi -O3 -mword-relocations -flto=aut
 
 CFLAGS	+=	$(INCLUDE) -DARM11 -D__3DS__ -D_GNU_SOURCE=1
 
+# picoc: UNIX_HOST is the only host flavour that fits newlib (the alternative is
+# MSVC). Its platform.h comes from common/script, not the submodule.
+# DEBUGGER doesn't pull in the interactive debugger (debug.c is filtered out of
+# CFILES below): it makes ParseStatement call DebugCheckStatement, which
+# ../common/script/scriptabort.c implements as the script-abort kill switch.
+CFLAGS	+=	-DUNIX_HOST -DDEBUGGER
+# picoc's C frames carry no unwind info by default, so a C++ exception thrown in
+# a script binding (e.g. std::bad_alloc parsing a large web response) cannot
+# unwind back through them and std::terminate()s the process. Emit unwind tables
+# so such a throw reaches the catch in ScriptEngine::run instead of aborting.
+CFLAGS	+=	-funwind-tables
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -std=gnu++23
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lcitro2d -lcitro3d -lctru -lm
+LIBS	:= -lcitro2d -lcitro3d -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz -lctru -lm
 
 CCACHE	:=	$(shell command -v ccache 2>/dev/null)
 ifneq ($(strip $(CCACHE)),)
@@ -122,6 +137,9 @@ export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+# picoc's interactive debugger stays out of the build; its Debug* entry points
+# come from ../common/script/scriptabort.c (the script-abort hook) instead.
+CFILES		:=	$(filter-out debug.c,$(CFILES))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 PICAFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))

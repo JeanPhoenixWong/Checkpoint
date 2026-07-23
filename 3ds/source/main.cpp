@@ -31,6 +31,7 @@
 #include "configuration.hpp"
 #include "ftpserver.hpp"
 #include "loader.hpp"
+#include "scriptrunner.hpp"
 #include "server.hpp"
 #include "textpool.hpp"
 #include "thread.hpp"
@@ -78,9 +79,25 @@ int main()
             hidTouchRead(&touch);
 
             if (hidKeysDown() & KEY_START) {
-                if (g_screen->allowsExit() && !TitleCatalog::get().progress().active && !TransferJob::get().active()) {
+                if (g_screen->allowsExit() && !TitleCatalog::get().progress().active && !TransferJob::get().active() &&
+                    !ScriptRunner::get().active()) {
                     break;
                 }
+            }
+
+            // Script kill switch: hold B to abort the running script (picoc
+            // fails the run at its next statement, so even an infinite loop
+            // dies without rebooting the console). Lives here rather than in
+            // MainScreen::update so it keeps counting while a script-raised
+            // overlay is swallowing that screen's update.
+            static int scriptCancelHold = 0;
+            if (ScriptRunner::get().active() && (hidKeysHeld() & KEY_B)) {
+                if (++scriptCancelHold >= 45 && !ScriptRunner::get().cancelRequested()) {
+                    ScriptRunner::get().requestCancel();
+                }
+            }
+            else {
+                scriptCancelHold = 0;
             }
 
             C3D_FrameBegin(C3D_FRAME_SYNCDRAW);

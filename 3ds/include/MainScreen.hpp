@@ -86,6 +86,11 @@ protected:
     void refreshSelected(void);
     void doBackup(size_t fullIndex, size_t cellIndex);
     void doRestore(size_t fullIndex, size_t cellIndex);
+    // Scans the script folders and raises the picker (Scripts action).
+    void startScriptPicker(void);
+    // While a script runs: raises the overlay for a pending ScriptUiBridge
+    // request (or answers a Keyboard request inline via swkbd).
+    void pumpScriptRequests(void);
     // Runs a restore of the current title's cellIndex backup, gated by the
     // "Confirm before restore" setting: shows a Yes/No prompt when enabled,
     // otherwise restores immediately.
@@ -93,10 +98,9 @@ protected:
 
 private:
     Hid<HidDirection::HORIZONTAL, HidDirection::VERTICAL> hid;
-    std::unique_ptr<Clickable> buttonBackup, buttonRestore, buttonPlayCoins;
-    std::unique_ptr<Clickable> buttonBackupAL, buttonRestoreAL; // narrower Backup/Restore laid out alongside Coins on Activity Log
-    std::unique_ptr<Clickable> buttonSend;                      // middle of the Backup/Send/Restore trio shown on a highlighted backup
-    std::unique_ptr<Clickable> buttonBackupAll;                 // full-width batch Backup shown in multi-select, replacing the two action buttons
+    std::unique_ptr<Clickable> buttonBackupAL, buttonRestoreAL; // narrower Backup/Restore of the three-button action rows
+    std::unique_ptr<Clickable> buttonSend;      // middle of the Backup/Send/Restore trio (greyed unless a highlighted backup is sendable)
+    std::unique_ptr<Clickable> buttonBackupAll; // full-width batch Backup shown in multi-select, replacing the two action buttons
     std::unique_ptr<BackupList> directoryList;
     std::string ver;
 
@@ -124,7 +128,6 @@ private:
         std::string cartId;      // productCode or "System title"
         std::string mediaType;
         bool favorite      = false;
-        bool activityLog   = false;
         bool transferRow   = false;   // rows were built with the "Receive" row at index 1
         size_t backupCount = 0;       // existing backups (action rows excluded)
         std::optional<u64> totalSize; // async total; nullopt while computing
