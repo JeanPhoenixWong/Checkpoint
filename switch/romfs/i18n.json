@@ -1646,7 +1646,7 @@
     "pt": "\"{0}\" falhou.",
     "nl": "\"{0}\" mislukt.",
     "ja": "「{0}」が失敗しました。",
-    "zh": ""\"{0}\"执行失败"
+    "zh": "\"{0}\"执行失败"
   },
   "scripts.aborted": {
     "en": "\"{0}\" aborted.",
@@ -1657,7 +1657,7 @@
     "pt": "\"{0}\" cancelado.",
     "nl": "\"{0}\" afgebroken.",
     "ja": "「{0}」を中止しました。",
-    "zh": ""\"{0}\"执行已中止"
+    "zh": "\"{0}\"执行已中止"
   },
   "scripts.start_failed": {
     "en": "Could not start the script thread.",
